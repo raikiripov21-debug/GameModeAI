@@ -63,6 +63,6 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    implementation("dev.rikka.shizuku:api:12.3.1")
-    implementation("dev.rikka.shizuku:provider:12.3.1")
+    implementation("dev.rikka.shizuku:api:11.0.3")
+    implementation("dev.rikka.shizuku:provider:11.0.3")
 }
