@@ -55,6 +55,15 @@ object ShizukuHelper {
             "am force-stop com.samsung.android.app.updatecenter",
             "am force-stop com.samsung.android.app.samsungbluetoothdevicemanager",
             "am force-stop com.samsung.android.app.galaxyfinder",
+            // Digital Wellbeing — consume CPU monitoreando el uso del teléfono
+            "am force-stop com.samsung.android.forest",
+            "am force-stop com.samsung.android.wellbeing",
+            // Wi-Fi Aware — protocolo P2P de Samsung, inútil durante gaming
+            "am force-stop com.samsung.android.aware.service",
+            // Samsung Pay Frame — no se usa durante el juego
+            "am force-stop com.samsung.android.spayfw",
+            // Samsung Location sensor DB — actualiza DB de localización en background
+            "am force-stop com.samsung.android.location.sensordatabaseprovider",
 
             // BLOQUE 3 · ANTI-CALENTAMIENTO FASE 1
             "settings put global nfc_on 0",
@@ -331,6 +340,11 @@ object ShizukuHelper {
             "settings put secure location_mode 3",
             "settings put global fstrim_mandatory_interval 3600000"
         ))
+    }
+
+    /** Ejecuta un único comando shell via Shizuku. Para uso externo (ej. botón Limpiar RAM). */
+    suspend fun run(cmd: String): Boolean = withContext(Dispatchers.IO) {
+        runCommands(listOf(cmd))
     }
 
     private fun runCommands(commands: List<String>): Boolean {
