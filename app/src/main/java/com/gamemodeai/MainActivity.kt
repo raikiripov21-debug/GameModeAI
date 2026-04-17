@@ -154,6 +154,7 @@ fun GameModeScreen(
     // Fase 2 — partida larga
     var isPhase2     by remember { mutableStateOf(false) }
     var countdown    by remember { mutableStateOf("") }   // "18:42" restantes
+    var sessionTime  by remember { mutableStateOf("") }   // "1:24:05" tiempo activo
 
     var actionMessage by remember { mutableStateOf("") }
 
@@ -198,12 +199,19 @@ fun GameModeScreen(
                 cpuTemp    = readCpuTempC()
                 ramFree    = getAvailableRamMb(context)
 
-                // Calcular cuenta regresiva hasta Fase 2
+                // Calcular cuenta regresiva hasta Fase 2 + temporizador de sesión
                 isPhase2 = Prefs.isPhase2Active(context)
-                if (!isPhase2) {
-                    val startMs  = Prefs.getLongGameStartMs(context)
-                    if (startMs > 0L) {
-                        val elapsedMs   = now - startMs
+                val startMs = Prefs.getLongGameStartMs(context)
+                if (startMs > 0L) {
+                    val elapsedMs = now - startMs
+                    // Temporizador de sesión (tiempo total activo)
+                    val h = (elapsedMs / 3_600_000L).toInt()
+                    val mT = ((elapsedMs % 3_600_000L) / 60_000L).toInt()
+                    val sT = ((elapsedMs % 60_000L) / 1000L).toInt()
+                    sessionTime = if (h > 0) "%d:%02d:%02d".format(h, mT, sT)
+                                  else "%d:%02d".format(mT, sT)
+                    // Cuenta regresiva a Fase 2
+                    if (!isPhase2) {
                         val remainingMs = (20 * 60 * 1000L) - elapsedMs
                         if (remainingMs > 0) {
                             val m = (remainingMs / 60_000L).toInt()
@@ -443,6 +451,15 @@ fun GameModeScreen(
                                     fontSize = 11.sp, color = RedBright.copy(alpha = 0.85f))
                             }
                         }
+                        if (sessionTime.isNotEmpty()) {
+                            HorizontalDivider(color = Color(0xFF1E1E1E))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically) {
+                                Text("Sesión activa", fontSize = 12.sp, color = GreyText)
+                                Text(sessionTime, fontSize = 16.sp, fontWeight = FontWeight.Bold,
+                                    color = if (isPhase2) TealAcc else GreenBright)
+                            }
+                        }
                         Text("FPS = fluidez de la interfaz · CPU alta = sin throttling = mira estable",
                             fontSize = 10.sp, color = GreyText.copy(alpha = 0.4f))
                     }
@@ -527,10 +544,41 @@ fun GameModeScreen(
                     Text("Sin tocar la sensibilidad del juego: reduce micro-saltos del sistema, vibración, gestos y cambios de Hz.",
                         fontSize = 11.sp, color = Color.White.copy(alpha = 0.35f))
                     HorizontalDivider(color = Color(0xFF1E1E1E))
-                    AimItem("Touch sensitivity Samsung ON · bloqueo/debounce táctil al mínimo")
+                    AimItem("Touch raw sin filtros: debounce 0 ms · sin suavizado ni predicción")
+                    AimItem("Long-press 300 ms (−100 ms) · doble tap más rápido")
+                    AimItem("Asistente virtual OFF · sin robo de toques de Samsung")
+                    AimItem("Swipe de cambio de app desactivado · sin salida accidental del juego")
+                    AimItem("Samsung Security Engine OFF · sin picos de CPU durante el aim")
                     AimItem("Animaciones 0× · respuesta visual inmediata al deslizar")
                     AimItem("60 Hz fijo · evita jitter por cambio dinámico de refresco")
                     AimItem("Gestos, panel lateral, vibración y sonidos táctiles OFF")
+                }
+            }
+
+            // ── Guía de sensibilidad Free Fire para Galaxy A06 ───────────────
+            Card(modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF001118)),
+                shape = RoundedCornerShape(16.dp)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("SENSIBILIDAD FREE FIRE — A06", fontSize = 10.sp,
+                            color = CyanAcc, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                        Text("720×1600", fontSize = 10.sp, color = GreyText)
+                    }
+                    Text("Ajustes para el panel LCD de 6.5\" del A06 con este modo activo:",
+                        fontSize = 11.sp, color = Color.White.copy(alpha = 0.4f))
+                    HorizontalDivider(color = Color(0xFF1E2A2E))
+                    SensRow("General",          "100",  "máximo control")
+                    SensRow("Retícula libre",   "100",  "persecución rápida")
+                    SensRow("Mirilla roja",     "80",   "balance velocidad/control")
+                    SensRow("2× Scope",         "60",   "francotirador medio")
+                    SensRow("4× Scope",         "40",   "francotirador largo")
+                    SensRow("Sniper (AWM)",     "20",   "precisión máxima")
+                    HorizontalDivider(color = Color(0xFF1E2A2E))
+                    Text("Gráficos → Suave · FPS → Máximo · Sombras → OFF · Anti-alias → OFF",
+                        fontSize = 10.sp, color = CyanAcc.copy(alpha = 0.5f))
                 }
             }
 
@@ -776,6 +824,17 @@ private fun OptCard(title: String, titleColor: Color, bg: Color,
         }
         Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f),
             modifier = Modifier.weight(1f))
+    }
+
+@Composable private fun SensRow(scope: String, value: String, note: String) =
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween) {
+        Text(scope, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f),
+            modifier = Modifier.weight(1f))
+        Text(value, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = CyanAcc,
+            modifier = Modifier.padding(horizontal = 12.dp))
+        Text(note, fontSize = 10.sp, color = GreyText,
+            modifier = Modifier.weight(1f), textAlign = TextAlign.End)
     }
 
 @Composable
