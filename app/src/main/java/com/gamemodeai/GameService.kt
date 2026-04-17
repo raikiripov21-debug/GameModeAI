@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,12 +43,18 @@ class GameService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private lateinit var notificationManager: NotificationManager
     private var monitorJob: Job? = null
+    // WakeLock parcial: evita que el Exynos 850 del A06 entre en deep sleep
+    // mientras el servicio aplica el mantenimiento cada 5 minutos.
+    private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification(phase2 = false, minLeft = 20))
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GameModeAI:SessionLock")
+        wakeLock?.acquire(6 * 60 * 60 * 1000L)   // máximo 6 horas
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -119,6 +126,8 @@ class GameService : Service() {
         monitorJob?.cancel()
         serviceScope.cancel()
         Prefs.clearLongGame(this)
+        if (wakeLock?.isHeld == true) wakeLock?.release()
+        wakeLock = null
     }
 
     // ── Fase 2 — reducción térmica para partidas largas ───────────────────────
