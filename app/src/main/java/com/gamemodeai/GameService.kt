@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -44,14 +45,20 @@ class GameService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private lateinit var notificationManager: NotificationManager
     private var monitorJob: Job? = null
-    // WakeLock parcial: evita que el Exynos 850 entre en deep sleep durante mantenimiento
+    // WakeLock parcial: evita que el procesador entre en deep sleep durante mantenimiento
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification(phase2 = false, minLeft = PHASE2_MINUTES))
+        val notification = buildNotification(phase2 = false, minLeft = PHASE2_MINUTES)
+        // Android 14+ requiere declarar el tipo de foreground service al llamar startForeground
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
+        } else {
+            startForeground(NOTIFICATION_ID, notification)
+        }
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GameModeAI:SessionLock")
         wakeLock?.acquire(6 * 60 * 60 * 1000L)
