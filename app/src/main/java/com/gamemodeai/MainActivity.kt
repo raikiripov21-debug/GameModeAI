@@ -152,11 +152,33 @@ fun GameModeScreen(
     var charging     by remember { mutableStateOf(isCharging(context)) }
 
     // Fase 2 — partida larga
-    var isPhase2     by remember { mutableStateOf(false) }
-    var countdown    by remember { mutableStateOf("") }   // "18:42" restantes
-    var sessionTime  by remember { mutableStateOf("") }   // "1:24:05" tiempo activo
+    var isPhase2         by remember { mutableStateOf(false) }
+    var countdown        by remember { mutableStateOf("") }   // "18:42" restantes
+    var sessionTime      by remember { mutableStateOf("") }   // "1:24:05" tiempo activo
+    var thermalEmergency by remember { mutableStateOf(false) }
 
     var actionMessage by remember { mutableStateOf("") }
+
+    // Emergencia térmica automática: si temp ≥ 48°C, aplicar enfriamiento de emergencia
+    val thermalScope = rememberCoroutineScope()
+    LaunchedEffect(cpuTemp, isActive) {
+        if (!isActive) { thermalEmergency = false; return@LaunchedEffect }
+        if (cpuTemp >= 48f && !thermalEmergency) {
+            thermalEmergency = true
+            thermalScope.launch {
+                ShizukuHelper.run(
+                    "settings put system screen_brightness 50 ; " +
+                    "settings put global background_process_limit 0 ; " +
+                    "am kill-all ; " +
+                    "am force-stop com.samsung.android.game.gos ; " +
+                    "am force-stop com.samsung.android.game.gamehome ; " +
+                    "am force-stop com.samsung.android.bixby.agent"
+                )
+            }
+        } else if (cpuTemp in 1f..45f) {
+            thermalEmergency = false
+        }
+    }
 
     LaunchedEffect(Unit) {
         shizuku = when {
@@ -555,30 +577,24 @@ fun GameModeScreen(
                 }
             }
 
-            // ── Guía de sensibilidad Free Fire para Galaxy A06 ───────────────
-            Card(modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF001118)),
-                shape = RoundedCornerShape(16.dp)) {
-                Column(Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            // ── EMERGENCIA TÉRMICA (> 48 °C) ─────────────────────────────────
+            if (thermalEmergency) {
+                Card(modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF280000)),
+                    shape = RoundedCornerShape(14.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(14.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        Text("SENSIBILIDAD FREE FIRE — A06", fontSize = 10.sp,
-                            color = CyanAcc, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                        Text("720×1600", fontSize = 10.sp, color = GreyText)
+                        Text("🔥", fontSize = 22.sp)
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("EMERGENCIA TÉRMICA", fontSize = 11.sp,
+                                color = RedBright, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                            Text("Brillo → mínimo · apps → 0 · GOS parado de emergencia",
+                                fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f))
+                            Text("Pausa el juego 1-2 min para bajar temperatura",
+                                fontSize = 10.sp, color = RedBright.copy(alpha = 0.6f))
+                        }
                     }
-                    Text("Ajustes para el panel LCD de 6.5\" del A06 con este modo activo:",
-                        fontSize = 11.sp, color = Color.White.copy(alpha = 0.4f))
-                    HorizontalDivider(color = Color(0xFF1E2A2E))
-                    SensRow("General",          "100",  "máximo control")
-                    SensRow("Retícula libre",   "100",  "persecución rápida")
-                    SensRow("Mirilla roja",     "80",   "balance velocidad/control")
-                    SensRow("2× Scope",         "60",   "francotirador medio")
-                    SensRow("4× Scope",         "40",   "francotirador largo")
-                    SensRow("Sniper (AWM)",     "20",   "precisión máxima")
-                    HorizontalDivider(color = Color(0xFF1E2A2E))
-                    Text("Gráficos → Suave · FPS → Máximo · Sombras → OFF · Anti-alias → OFF",
-                        fontSize = 10.sp, color = CyanAcc.copy(alpha = 0.5f))
                 }
             }
 
@@ -824,17 +840,6 @@ private fun OptCard(title: String, titleColor: Color, bg: Color,
         }
         Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f),
             modifier = Modifier.weight(1f))
-    }
-
-@Composable private fun SensRow(scope: String, value: String, note: String) =
-    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(scope, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f),
-            modifier = Modifier.weight(1f))
-        Text(value, fontSize = 14.sp, fontWeight = FontWeight.Bold, color = CyanAcc,
-            modifier = Modifier.padding(horizontal = 12.dp))
-        Text(note, fontSize = 10.sp, color = GreyText,
-            modifier = Modifier.weight(1f), textAlign = TextAlign.End)
     }
 
 @Composable
