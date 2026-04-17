@@ -379,10 +379,23 @@ fun GameModeScreen(
                         }
                     }
                     HorizontalDivider(color = Color(0xFF1E1E1E))
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically) {
                         Text("Shizuku", fontSize = 12.sp, color = GreyText)
-                        Text(shizuku, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                            color = if (shizuku == "Listo") GreenBright else RedBright)
+                        if (shizuku == "Sin permiso") {
+                            TextButton(
+                                onClick = { ShizukuHelper.requestPermission() },
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                            ) {
+                                Text("Sin permiso — Toca para conceder",
+                                    fontSize = 11.sp, color = YellowAcc,
+                                    fontWeight = FontWeight.Bold)
+                            }
+                        } else {
+                            Text(shizuku, fontSize = 12.sp, fontWeight = FontWeight.Medium,
+                                color = if (shizuku == "Listo") GreenBright else RedBright)
+                        }
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Android", fontSize = 12.sp, color = GreyText)
