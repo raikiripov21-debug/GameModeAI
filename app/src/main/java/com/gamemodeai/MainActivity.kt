@@ -307,12 +307,27 @@ fun GameModeScreen(
                         fontSize = 10.sp, color = YellowAcc.copy(alpha = 0.8f),
                         fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
 
-                    TipItem("Gráficos → Suave + Máxima velocidad")
-                    TipItem("Activar modo juego dentro de Free Fire")
-                    TipItem("Sensibilidad general: 90-100")
-                    TipItem("Sensibilidad mira roja: 80-90")
-                    TipItem("Desactivar efectos de sangre y climáticos")
-                    TipItem("Cerrar otras apps antes de entrar a partida")
+                    Text("  Gráficos", fontSize = 11.sp,
+                        color = YellowAcc.copy(alpha = 0.6f), fontWeight = FontWeight.Bold)
+                    TipItem("Calidad: Suave · Velocidad: Máxima")
+                    TipItem("Desactivar efectos climáticos y de sangre")
+
+                    Spacer(Modifier.height(2.dp))
+                    Text("  Sensibilidad (para levantar y pegar rojos)",
+                        fontSize = 11.sp, color = YellowAcc.copy(alpha = 0.6f),
+                        fontWeight = FontWeight.Bold)
+                    TipItem("General: 80 – 95")
+                    TipItem("Punto rojo / Mira: 85 – 100")
+                    TipItem("Vista 2x: 60 – 75")
+                    TipItem("Vista 4x: 40 – 55")
+                    TipItem("Francotirador: 20 – 35")
+
+                    Spacer(Modifier.height(2.dp))
+                    Text("  Antes de cada partida", fontSize = 11.sp,
+                        color = YellowAcc.copy(alpha = 0.6f), fontWeight = FontWeight.Bold)
+                    TipItem("Activa esta app primero, luego abre Free Fire")
+                    TipItem("Cierra todas las apps del historial")
+                    TipItem("Activa modo avión y desactívalo (ping más limpio)")
                 }
             }
 
