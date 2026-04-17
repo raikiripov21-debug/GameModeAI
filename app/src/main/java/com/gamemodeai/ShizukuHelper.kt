@@ -73,6 +73,7 @@ object ShizukuHelper {
             "settings put global automatic_power_save_mode 0",
             "settings put global low_power 0",
             "settings put global extreme_power_save_mode 0",
+            "settings put global app_standby_enabled 0",
 
             // BLOQUE 5 · PANTALLA
             "settings put global window_animation_scale 0",
@@ -93,7 +94,7 @@ object ShizukuHelper {
             // BLOQUE 7 · AIM / TOUCH
             "settings put system haptic_feedback_enabled 0",
             "settings put system sound_effects_enabled 0",
-            "settings put system pointer_speed 0",
+            "settings put system pointer_speed 1",
             "settings put system pointer_location 0",
             "settings put system show_touches 0",
             "settings put system touch_sensitivity_mode 1",
@@ -118,6 +119,7 @@ object ShizukuHelper {
             "settings put global policy_control immersive.full=com.dts.freefireth,com.dts.freefiremaxob",
             "settings put secure immersive_mode_confirmations confirmed",
             "settings put system prevent_accidental_touch 0",
+            "settings put system accidental_touch_protection 0",
             "settings put global device_idle_constants min_time_to_alarm=3600000",
             "settings put global wifi_watchdog_on 0",
 
@@ -127,8 +129,8 @@ object ShizukuHelper {
 
             // BLOQUE 10 · MEMORIA
             "am kill-all",
-            "settings put global always_finish_activities 1",
-            "settings put global background_process_limit 1",
+            "settings put global always_finish_activities 0",
+            "settings put global background_process_limit 2",
             "settings put global cached_apps_freezer enabled",
 
             // BLOQUE 11 · RED
@@ -144,6 +146,25 @@ object ShizukuHelper {
             "settings put system notification_bubbles 0",
             "settings put global fstrim_mandatory_interval 86400000",
             "am kill-all"
+        ))
+    }
+
+    suspend fun applyMaintenanceMode(): Boolean = withContext(Dispatchers.IO) {
+        runCommands(listOf(
+            "am force-stop com.samsung.android.game.gos",
+            "am force-stop com.samsung.android.game.gamehome",
+            "am force-stop com.samsung.android.game.gametools",
+            "cmd activity set-standby-bucket com.dts.freefireth active",
+            "cmd activity set-standby-bucket com.dts.freefiremaxob active",
+            "settings put global window_animation_scale 0",
+            "settings put global transition_animation_scale 0",
+            "settings put global animator_duration_scale 0",
+            "settings put global wifi_scan_always_enabled 0",
+            "settings put global sync_disabled 1",
+            "settings put global nfc_on 0",
+            "settings put system haptic_feedback_enabled 0",
+            "settings put system sound_effects_enabled 0",
+            "settings put system touch_sensitivity_mode 1"
         ))
     }
 
@@ -169,8 +190,8 @@ object ShizukuHelper {
             "am force-stop com.samsung.android.sm",
             "am force-stop com.samsung.android.lool",
 
-            // Reducir al mínimo los procesos de fondo (0 = solo el juego)
-            "settings put global background_process_limit 0",
+            // Reducir al mínimo estable los procesos de fondo
+            "settings put global background_process_limit 1",
 
             // Segunda limpieza de RAM
             "am kill-all",
@@ -196,6 +217,24 @@ object ShizukuHelper {
         ))
     }
 
+    suspend fun applyLongGameMaintenance(): Boolean = withContext(Dispatchers.IO) {
+        runCommands(listOf(
+            "settings put system screen_brightness 75",
+            "am force-stop com.samsung.android.game.gos",
+            "am force-stop com.samsung.android.bixby.agent",
+            "am force-stop com.samsung.android.bixby.service",
+            "cmd activity set-standby-bucket com.dts.freefireth active",
+            "cmd activity set-standby-bucket com.dts.freefiremaxob active",
+            "settings put global background_process_limit 1",
+            "settings put global wifi_scan_always_enabled 0",
+            "settings put global sync_disabled 1",
+            "settings put secure location_mode 0",
+            "settings put global nfc_on 0",
+            "settings put system haptic_feedback_enabled 0",
+            "settings put system sound_effects_enabled 0"
+        ))
+    }
+
     // ══════════════════════════════════════════════════════════════════════════
     // DESACTIVAR MODO JUEGO
     // ══════════════════════════════════════════════════════════════════════════
@@ -208,6 +247,7 @@ object ShizukuHelper {
             "settings put global sem_enhanced_cpu_responsiveness 0",
             "settings put global adaptive_battery_management_enabled 1",
             "settings put global automatic_power_save_mode 1",
+            "settings put global app_standby_enabled 1",
             "settings put global nfc_on 1",
             "settings put system screen_brightness_mode 1",
             "settings put global always_on_display_enabled 1",
@@ -224,6 +264,7 @@ object ShizukuHelper {
             "settings put system touch_event_blocking_period 100",
             "settings put system touch_smooth_mode 1",
             "settings put system touch_sensitivity_auto_adjust 1",
+            "settings put system accidental_touch_protection 1",
             "settings put secure touch_exploration_enabled 0",
             "settings put secure spell_checker_enabled 1",
             "settings put system edge_panels_enabled 1",

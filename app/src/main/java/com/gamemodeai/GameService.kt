@@ -17,6 +17,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 
 class GameService : Service() {
 
@@ -40,6 +41,7 @@ class GameService : Service() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private lateinit var notificationManager: NotificationManager
+    private var monitorJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -49,17 +51,21 @@ class GameService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        monitorJob?.cancel()
 
         // Registrar el tiempo de inicio de la sesión
         Prefs.startLongGame(this)
 
-        serviceScope.launch {
+        monitorJob = serviceScope.launch {
 
             // ── Contador de minutos para la notificación ──────────────────────
             var elapsed = 0
             while (isActive && elapsed < 20) {
                 delay(60_000L)   // 1 minuto
                 elapsed++
+                if (elapsed % 5 == 0) {
+                    ShizukuHelper.applyMaintenanceMode()
+                }
                 val minLeft = 20 - elapsed
                 notificationManager.notify(
                     NOTIFICATION_ID,
@@ -73,9 +79,14 @@ class GameService : Service() {
             }
 
             // ── Seguir actualizando notificación en fase 2 ────────────────────
+            var phase2Elapsed = 0
             while (isActive) {
                 delay(60_000L)
+                phase2Elapsed++
                 if (isActive) {
+                    if (phase2Elapsed % 5 == 0) {
+                        ShizukuHelper.applyLongGameMaintenance()
+                    }
                     notificationManager.notify(
                         NOTIFICATION_ID,
                         buildNotification(phase2 = true, minLeft = 0)
@@ -84,13 +95,14 @@ class GameService : Service() {
             }
         }
 
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         super.onDestroy()
+        monitorJob?.cancel()
         serviceScope.cancel()
         Prefs.clearLongGame(this)
     }

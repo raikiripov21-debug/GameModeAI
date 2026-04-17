@@ -1,12 +1,16 @@
 package com.gamemodeai
 
+import android.Manifest
 import android.app.ActivityManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -31,9 +35,13 @@ import java.io.File
 import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        requestNotificationPermissionIfNeeded()
         setContent {
             GameModeAITheme {
                 GameModeScreen(
@@ -47,6 +55,14 @@ class MainActivity : ComponentActivity() {
                     }
                 )
             }
+        }
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
     }
 }
@@ -120,12 +136,7 @@ fun GameModeScreen(
     var isPhase2     by remember { mutableStateOf(false) }
     var countdown    by remember { mutableStateOf("") }   // "18:42" restantes
 
-    // Sensibilidades
-    var sensGeneral  by remember { mutableIntStateOf(Prefs.getSensGeneral(context)) }
-    var sensRedDot   by remember { mutableIntStateOf(Prefs.getSensRedDot(context)) }
-    var sens2x       by remember { mutableIntStateOf(Prefs.getSens2x(context)) }
-    var sens4x       by remember { mutableIntStateOf(Prefs.getSens4x(context)) }
-    var sensSniper   by remember { mutableIntStateOf(Prefs.getSensSniper(context)) }
+    var actionMessage by remember { mutableStateOf("") }
 
     LaunchedEffect(Unit) {
         shizuku = when {
@@ -197,7 +208,7 @@ fun GameModeScreen(
 
             // ── Header ────────────────────────────────────────────────────────
             Text("GameModeAI", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text("Galaxy A06  ·  Free Fire  ·  sin anticheat", fontSize = 11.sp, color = GreyText)
+            Text("Galaxy A06  ·  Free Fire  ·  ajustes del sistema", fontSize = 11.sp, color = GreyText)
 
             // ── FASE 2 BANNER (cuando está activa) ────────────────────────────
             if (isActive && isPhase2) {
@@ -378,35 +389,34 @@ fun GameModeScreen(
                         Text("${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}",
                             fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
                     }
+                    if (actionMessage.isNotEmpty()) {
+                        HorizontalDivider(color = Color(0xFF1E1E1E))
+                        Text(actionMessage, fontSize = 11.sp,
+                            color = if (shizuku == "Listo") GreenBright.copy(alpha = 0.75f) else YellowAcc.copy(alpha = 0.85f))
+                    }
                 }
             }
 
-            // ── SLIDERS DE SENSIBILIDAD ───────────────────────────────────────
+            // ── AIM AUTOMÁTICO ─────────────────────────────────────────────────
             Card(modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF0E0018)),
                 shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically) {
-                        Text("SENSIBILIDAD DE MIRA", fontSize = 10.sp,
+                        Text("AIM ESTABLE AUTOMÁTICO", fontSize = 10.sp,
                             color = PurpleAcc, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                        Text("se guarda sola", fontSize = 10.sp, color = GreyText)
+                        Text(if (isActive) "aplicado" else "listo", fontSize = 10.sp,
+                            color = if (isActive) GreenBright else GreyText)
                     }
-                    Text("Ajusta · prueba en sala · vuelve a ajustar",
+                    Text("Sin tocar la sensibilidad del juego: reduce micro-saltos del sistema, vibración, gestos y cambios de Hz.",
                         fontSize = 11.sp, color = Color.White.copy(alpha = 0.35f))
-                    Spacer(Modifier.height(8.dp))
-                    SensSlider("General",           "rec. 85–95",  sensGeneral, 60,  100, PurpleAcc) { sensGeneral = it; Prefs.setSensGeneral(context, it) }
-                    SensSlider("Punto rojo / Mira", "rec. 90–100", sensRedDot,  70,  100, RedBright) { sensRedDot  = it; Prefs.setSensRedDot(context, it) }
-                    SensSlider("Vista 2x",          "rec. 65–75",  sens2x,      40,   90, BlueAcc)   { sens2x      = it; Prefs.setSens2x(context, it) }
-                    SensSlider("Vista 4x",          "rec. 45–55",  sens4x,      20,   70, YellowAcc) { sens4x      = it; Prefs.setSens4x(context, it) }
-                    SensSlider("Francotirador",     "rec. 20–30",  sensSniper,   5,   50, OrangeAcc) { sensSniper  = it; Prefs.setSensSniper(context, it) }
-                    Spacer(Modifier.height(4.dp))
                     HorizontalDivider(color = Color(0xFF1E1E1E))
-                    Spacer(Modifier.height(4.dp))
-                    Text("Si la mira salta al levantar → baja General 5 pts.\n" +
-                        "Si va lenta → súbelo 5 pts. Prueba en sala de entrenamiento.",
-                        fontSize = 11.sp, color = PurpleAcc.copy(alpha = 0.4f))
+                    AimItem("Touch sensitivity Samsung ON · bloqueo/debounce táctil al mínimo")
+                    AimItem("Animaciones 0× · respuesta visual inmediata al deslizar")
+                    AimItem("60 Hz fijo · evita jitter por cambio dinámico de refresco")
+                    AimItem("Gestos, panel lateral, vibración y sonidos táctiles OFF")
                 }
             }
 
@@ -446,9 +456,9 @@ fun GameModeScreen(
 
                 // AIM
                 OptCard("◈ MIRA SIN SALTOS", PurpleAcc, Color(0xFF0E0018)) {
-                    AimItem("Touch smoothing Samsung OFF → dedo sin interpolación")
-                    AimItem("Rebotes táctiles → 0 ms (sin micro-saltos)")
-                    AimItem("Debounce táctil → 0 ms (respuesta instantánea)")
+                    AimItem("Perfil automático de aim: sin sliders manuales ni cambios dentro del juego")
+                    AimItem("Rebotes táctiles y debounce → mínimo posible")
+                    AimItem("Puntero y respuesta táctil estabilizados por sistema")
                     AimItem("60 Hz fijo → sin jitter por cambio de Hz")
                     AimItem("Vision Booster OFF → GPU limpia")
                     AimItem("Vibración OFF → dedo más estable")
@@ -485,8 +495,24 @@ fun GameModeScreen(
                         if (success) {
                             isActive = activate
                             Prefs.setActive(context, activate)
+                            actionMessage = if (activate)
+                                "Modo juego activo. El mantenimiento se reaplica cada 5 minutos durante partidas largas."
+                            else
+                                "Modo juego desactivado. Ajustes principales restaurados."
                             if (activate) { GameService.start(context); ramFree = getAvailableRamMb(context) }
                             else { GameService.stop(context); ramBefore = 0L; ramFree = getAvailableRamMb(context); isPhase2 = false; countdown = "" }
+                            shizuku = "Listo"
+                        } else {
+                            shizuku = when {
+                                !ShizukuHelper.isShizukuAvailable() -> "No disponible"
+                                !ShizukuHelper.hasPermission() -> "Sin permiso"
+                                else -> "Error"
+                            }
+                            actionMessage = when (shizuku) {
+                                "No disponible" -> "Abre Shizuku, inicia el servicio y vuelve a intentarlo."
+                                "Sin permiso" -> "Acepta el permiso de Shizuku y toca activar otra vez."
+                                else -> "No se pudieron aplicar todos los ajustes. Revisa Shizuku y prueba de nuevo."
+                            }
                         }
                     }
                 },
@@ -544,32 +570,6 @@ private fun MonitorMetric(value: String, label: String, hint: String, color: Col
         Text(value, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = color)
         Text(label, fontSize = 10.sp, color = GreyText)
         Text(hint,  fontSize = 10.sp, color = color.copy(alpha = 0.7f))
-    }
-}
-
-@Composable
-private fun SensSlider(label: String, hint: String, value: Int, min: Int, max: Int,
-                       color: Color, onChange: (Int) -> Unit) {
-    Column(Modifier.fillMaxWidth()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically) {
-            Text(label, fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.Medium)
-            Row(verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(hint, fontSize = 10.sp, color = GreyText)
-                Box(modifier = Modifier.clip(RoundedCornerShape(6.dp))
-                    .background(color.copy(alpha = 0.15f))
-                    .padding(horizontal = 10.dp, vertical = 2.dp),
-                    contentAlignment = Alignment.Center) {
-                    Text("$value", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = color)
-                }
-            }
-        }
-        Slider(value = value.toFloat(), onValueChange = { onChange(it.roundToInt()) },
-            valueRange = min.toFloat()..max.toFloat(), steps = (max - min) - 1,
-            modifier = Modifier.fillMaxWidth(),
-            colors = SliderDefaults.colors(thumbColor = color,
-                activeTrackColor = color, inactiveTrackColor = Color(0xFF222222)))
     }
 }
 
