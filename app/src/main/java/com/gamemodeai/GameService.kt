@@ -25,7 +25,8 @@ class GameService : Service() {
     companion object {
         const val CHANNEL_ID      = "game_mode_channel"
         const val NOTIFICATION_ID = 1001
-        const val PHASE2_DELAY_MS = 20 * 60 * 1000L   // 20 minutos para Exynos 850
+        const val PHASE2_MINUTES  = 20                  // Exynos 850 — menos eficiente que 1380
+        const val PHASE2_DELAY_MS = PHASE2_MINUTES * 60 * 1000L
 
         fun start(context: Context) {
             val intent = Intent(context, GameService::class.java)
@@ -50,7 +51,7 @@ class GameService : Service() {
         super.onCreate()
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
-        startForeground(NOTIFICATION_ID, buildNotification(phase2 = false, minLeft = 20))
+        startForeground(NOTIFICATION_ID, buildNotification(phase2 = false, minLeft = PHASE2_MINUTES))
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GameModeAI:SessionLock")
         wakeLock?.acquire(6 * 60 * 60 * 1000L)
@@ -69,19 +70,19 @@ class GameService : Service() {
             val startMs     = Prefs.getLongGameStartMs(this@GameService)
             val elapsedMs   = System.currentTimeMillis() - startMs
             val remainingMs = (PHASE2_DELAY_MS - elapsedMs).coerceAtLeast(0L)
-            val elapsedMin  = (elapsedMs / 60_000L).coerceAtMost(20L).toInt()
+            val elapsedMin  = (elapsedMs / 60_000L).coerceAtMost(PHASE2_MINUTES.toLong()).toInt()
 
             if (Prefs.isPhase2Active(this@GameService)) {
                 // Fase 2 ya activa — ir directo al bucle de mantenimiento
             } else if (remainingMs > 0L) {
                 var elapsed = elapsedMin
-                while (isActive && elapsed < 20) {
+                while (isActive && elapsed < PHASE2_MINUTES) {
                     delay(60_000L)
                     elapsed++
                     if (elapsed % 5 == 0) {
                         ShizukuHelper.applyMaintenanceMode()
                     }
-                    val minLeft = 20 - elapsed
+                    val minLeft = PHASE2_MINUTES - elapsed
                     notificationManager.notify(
                         NOTIFICATION_ID,
                         buildNotification(phase2 = false, minLeft = minLeft)
