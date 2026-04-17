@@ -53,45 +53,59 @@ class GameService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         monitorJob?.cancel()
 
-        // Registrar el tiempo de inicio de la sesión
-        Prefs.startLongGame(this)
+        // Solo registrar tiempo de inicio si no hay uno ya (evita resetear el contador
+        // cuando Android reinicia el servicio con START_STICKY después de matarlo).
+        val alreadyRunning = Prefs.getLongGameStartMs(this) > 0L
+        if (!alreadyRunning) {
+            Prefs.startLongGame(this)
+        }
 
         monitorJob = serviceScope.launch {
 
-            // ── Contador de minutos para la notificación ──────────────────────
-            var elapsed = 0
-            while (isActive && elapsed < 20) {
-                delay(60_000L)   // 1 minuto
-                elapsed++
-                if (elapsed % 5 == 0) {
-                    ShizukuHelper.applyMaintenanceMode()
-                }
-                val minLeft = 20 - elapsed
-                notificationManager.notify(
-                    NOTIFICATION_ID,
-                    buildNotification(phase2 = false, minLeft = minLeft)
-                )
-            }
+            // Calcular minutos restantes basándose en el tiempo de inicio real
+            // (importante para recuperarse correctamente tras un reinicio de servicio)
+            val startMs     = Prefs.getLongGameStartMs(this@GameService)
+            val elapsedMs   = System.currentTimeMillis() - startMs
+            val remainingMs = (PHASE2_DELAY_MS - elapsedMs).coerceAtLeast(0L)
+            val elapsedMin  = (elapsedMs / 60_000L).coerceAtMost(20L).toInt()
 
-            // ── FASE 2: 20 minutos cumplidos ──────────────────────────────────
-            if (isActive) {
+            if (Prefs.isPhase2Active(this@GameService)) {
+                // La Fase 2 ya estaba activa — saltar directamente al bucle de mantenimiento
+            } else if (remainingMs > 0L) {
+                // Contar desde los minutos ya transcurridos hacia los 20
+                var elapsed = elapsedMin
+                while (isActive && elapsed < 20) {
+                    delay(60_000L)   // 1 minuto
+                    elapsed++
+                    if (elapsed % 5 == 0) {
+                        ShizukuHelper.applyMaintenanceMode()
+                    }
+                    val minLeft = 20 - elapsed
+                    notificationManager.notify(
+                        NOTIFICATION_ID,
+                        buildNotification(phase2 = false, minLeft = minLeft)
+                    )
+                }
+                if (isActive) {
+                    applyPhase2()
+                }
+            } else {
+                // Han pasado más de 20 minutos y Fase 2 aún no se aplicó
                 applyPhase2()
             }
 
-            // ── Seguir actualizando notificación en fase 2 ────────────────────
+            // ── Bucle de mantenimiento Fase 2 ────────────────────────────────
             var phase2Elapsed = 0
             while (isActive) {
                 delay(60_000L)
                 phase2Elapsed++
-                if (isActive) {
-                    if (phase2Elapsed % 5 == 0) {
-                        ShizukuHelper.applyLongGameMaintenance()
-                    }
-                    notificationManager.notify(
-                        NOTIFICATION_ID,
-                        buildNotification(phase2 = true, minLeft = 0)
-                    )
+                if (phase2Elapsed % 5 == 0) {
+                    ShizukuHelper.applyLongGameMaintenance()
                 }
+                notificationManager.notify(
+                    NOTIFICATION_ID,
+                    buildNotification(phase2 = true, minLeft = 0)
+                )
             }
         }
 
@@ -128,7 +142,7 @@ class GameService : Service() {
         )
 
         val title = if (phase2)
-            "🌡 Fase 2 activa — Partida larga"
+            "GameModeAI — Fase 2 activa"
         else
             "GameModeAI activo"
 
@@ -137,7 +151,7 @@ class GameService : Service() {
         else if (minLeft > 1)
             "Fase 2 térmica en $minLeft min · aim y rendimiento optimizados"
         else
-            "Fase 2 térmica en $minLeft min · ¡casi lista!"
+            "Fase 2 térmica en $minLeft min · casi lista!"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
