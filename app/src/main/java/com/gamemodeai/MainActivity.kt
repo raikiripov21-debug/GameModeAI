@@ -3,7 +3,10 @@ package com.gamemodeai
 import android.Manifest
 import android.app.ActivityManager
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -97,6 +100,18 @@ fun readCpuTempC(): Float {
         }
     return 0f
 }
+fun getBatteryLevel(context: Context): Int {
+    val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
+    val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
+    return if (level >= 0 && scale > 0) (level * 100 / scale) else -1
+}
+fun isCharging(context: Context): Boolean {
+    val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+    return status == BatteryManager.BATTERY_STATUS_CHARGING ||
+           status == BatteryManager.BATTERY_STATUS_FULL
+}
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 private val BgDark      = Color(0xFF0A0A0A)
@@ -132,6 +147,10 @@ fun GameModeScreen(
     var fpsCounter   by remember { mutableIntStateOf(0) }
     var lastFpsMs    by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
+    // Batería
+    var batteryPct   by remember { mutableIntStateOf(getBatteryLevel(context)) }
+    var charging     by remember { mutableStateOf(isCharging(context)) }
+
     // Fase 2 — partida larga
     var isPhase2     by remember { mutableStateOf(false) }
     var countdown    by remember { mutableStateOf("") }   // "18:42" restantes
@@ -144,7 +163,18 @@ fun GameModeScreen(
             !ShizukuHelper.hasPermission()       -> "Sin permiso"
             else                                  -> "Listo"
         }
-        ramFree = getAvailableRamMb(context)
+        ramFree    = getAvailableRamMb(context)
+        batteryPct = getBatteryLevel(context)
+        charging   = isCharging(context)
+    }
+
+    // Lectura de batería cada 30 segundos en segundo plano
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000L)
+            batteryPct = getBatteryLevel(context)
+            charging   = isCharging(context)
+        }
     }
 
     // Monitor continuo: FPS + CPU + temperatura + fase2 cada segundo
@@ -207,8 +237,57 @@ fun GameModeScreen(
             Spacer(Modifier.height(4.dp))
 
             // ── Header ────────────────────────────────────────────────────────
-            Text("GameModeAI", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("GameModeAI", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("v1.1", fontSize = 11.sp, color = GreyText,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(Color(0xFF1E1E1E))
+                        .padding(horizontal = 6.dp, vertical = 2.dp))
+            }
             Text("Galaxy A06  ·  Free Fire  ·  ajustes del sistema", fontSize = 11.sp, color = GreyText)
+
+            // ── AVISO CARGANDO — el A06 se calienta mucho al jugar cargando ──
+            if (charging) {
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1A0800))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("⚠", fontSize = 18.sp)
+                        Column {
+                            Text("CARGANDO mientras juegas",
+                                fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                color = OrangeAcc, letterSpacing = 0.5.sp)
+                            Text("El A06 puede sobrecalentarse. Desconecta el cargador para partidas largas.",
+                                fontSize = 11.sp, color = Color.White.copy(alpha = 0.65f))
+                        }
+                    }
+                }
+            }
+
+            // ── SHIZUKU NO DISPONIBLE — instrucciones paso a paso ────────────
+            if (shizuku == "No disponible") {
+                Card(modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1A0000)),
+                    shape = RoundedCornerShape(14.dp)) {
+                    Column(Modifier.fillMaxWidth().padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("SHIZUKU NO ESTÁ ACTIVO", fontSize = 10.sp,
+                            color = RedBright, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                        Text("Esta app necesita Shizuku para funcionar. Sigue estos pasos:",
+                            fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
+                        SetupStep("1", "Instala Shizuku desde Play Store")
+                        SetupStep("2", "Abre Shizuku y toca 'Iniciar mediante ADB inalámbrico' (Android 11+) o 'Iniciar mediante root'")
+                        SetupStep("3", "Sigue las instrucciones en pantalla de Shizuku")
+                        SetupStep("4", "Vuelve aquí — la app detectará Shizuku automáticamente")
+                    }
+                }
+            }
 
             // ── FASE 2 BANNER (cuando está activa) ────────────────────────────
             if (isActive && isPhase2) {
@@ -313,7 +392,7 @@ fun GameModeScreen(
 
                         Row(Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceEvenly) {
-                            MonitorMetric(if (fps > 0) "$fps" else "—", "FPS app",
+                            MonitorMetric(if (fps > 0) "$fps" else "—", "FPS pantalla",
                                 if (fps >= 58) "Fluido" else if (fps > 0) "Bajo" else "—", fpsColor)
                             MonitorMetric(if (cpuMhz > 0) "$cpuMhz" else "—", "CPU MHz",
                                 if (cpuMhz > 0 && maxFreq > 0) "${(freqPct*100).roundToInt()}%" else "—", freqColor)
@@ -396,6 +475,13 @@ fun GameModeScreen(
                             Text(shizuku, fontSize = 12.sp, fontWeight = FontWeight.Medium,
                                 color = if (shizuku == "Listo") GreenBright else RedBright)
                         }
+                    }
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Batería", fontSize = 12.sp, color = GreyText)
+                        val batColor = when { batteryPct > 50 -> GreenBright; batteryPct > 20 -> YellowAcc; else -> RedBright }
+                        Text(
+                            if (batteryPct >= 0) "${batteryPct}%${if (charging) " ⚡" else ""}" else "—",
+                            fontSize = 12.sp, fontWeight = FontWeight.Medium, color = batColor)
                     }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Android", fontSize = 12.sp, color = GreyText)
@@ -634,6 +720,18 @@ private fun OptCard(title: String, titleColor: Color, bg: Color,
     Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("›", fontSize = 13.sp, color = YellowAcc)
         Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f)) }
+
+@Composable private fun SetupStep(number: String, text: String) =
+    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(
+            modifier = Modifier.size(20.dp).clip(CircleShape).background(RedBright.copy(alpha = 0.2f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(number, fontSize = 11.sp, color = RedBright, fontWeight = FontWeight.Bold)
+        }
+        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f),
+            modifier = Modifier.weight(1f))
+    }
 
 @Composable
 fun GameModeAITheme(content: @Composable () -> Unit) {
