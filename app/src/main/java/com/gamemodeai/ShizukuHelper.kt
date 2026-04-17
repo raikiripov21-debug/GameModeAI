@@ -104,27 +104,36 @@ object ShizukuHelper {
             "settings put global enable_vulkan_validation_layers 0",
 
             // BLOQUE 7 · AIM / TOUCH — precisión máxima del A06
+            // Táctil sin filtros: desactiva todo suavizado y predicción para respuesta raw
             "settings put system haptic_feedback_enabled 0",
             "settings put system sound_effects_enabled 0",
             "settings put system pointer_speed 1",
             "settings put system pointer_location 0",
             "settings put system show_touches 0",
-            "settings put system touch_sensitivity_mode 1",
-            "settings put system touch_blocking_period 0",
-            "settings put system touch_debounce_period 0",
+            "settings put system touch_sensitivity_mode 1",  // alta sensibilidad: LCD A06 sin protector
+            "settings put system touch_blocking_period 0",   // sin bloqueo entre eventos táctiles
+            "settings put system touch_debounce_period 0",   // sin debounce → cada toque cuenta
             "settings put system touch_event_blocking_period 0",
-            "settings put system touch_smooth_mode 0",
+            "settings put system touch_smooth_mode 0",       // sin suavizado: posición exacta del dedo
             "settings put system touch_sensitivity_auto_adjust 0",
             "settings put secure touch_exploration_enabled 0",
             "settings put secure accessibility_display_magnification_enabled 0",
             "settings put secure spell_checker_enabled 0",
+            // Tiempo de respuesta táctil: long-press y doble toque más rápidos
+            "settings put system long_press_timeout 300",    // 400ms→300ms: gestos más reactivos
+            "settings put system multi_press_timeout 300",   // doble toque reconocido 100ms antes
+            // Asistente virtual: desactivar completamente para que no robe toques
+            "settings put secure assist_gesture_enabled 0",
+            "settings put secure assist_gesture_wake 0",
+            "settings put secure double_tap_to_wake 0",      // evita despertar accidental al rozar pantalla
 
-            // BLOQUE 8 · FALLOS SAMSUNG A06 — corrección de gestos/paneles
+            // BLOQUE 8 · GESTOS SAMSUNG — eliminar toda interferencia durante el juego
             "settings put system edge_panels_enabled 0",
             "settings put system edge_typing_enabled 0",
             "settings put system edge_lighting_enabled 0",
             "settings put system one_handed_mode_enabled 0",
             "settings put system one_handed_mode_trigger 0",
+            "settings put system swipe_up_to_switch_apps_enabled 0", // sin cambio accidental de app
             "settings put secure camera_double_tap_power_key_gesture_disabled 1",
             "settings put secure assistant_gesture_triggered 1",
             "settings put secure navigation_mode 0",
@@ -135,7 +144,14 @@ object ShizukuHelper {
             "settings put global device_idle_constants min_time_to_alarm=3600000",
             "settings put global wifi_watchdog_on 0",
 
-            // BLOQUE 9 · PROCESO — Free Fire con máxima prioridad
+            // BLOQUE 9 · SAMSUNG SECURITY ENGINE — reduce picos de CPU inesperados
+            // El motor de seguridad de Samsung hace análisis en background y causa microfreezes
+            "settings put global sem_mobile_security_engine 0",
+            "settings put global game_mode_intervention 0",  // Samsung GOS no puede intervenir
+            "settings put secure screensaver_enabled 0",     // sin Daydream que despierte la GPU
+            "settings put global network_scoring_ui_enabled 0", // scoring de red: análisis innecesario
+
+            // BLOQUE 10 · PROCESO — Free Fire con máxima prioridad
             "cmd activity set-standby-bucket com.dts.freefireth active",
             "cmd activity set-standby-bucket com.dts.freefiremaxob active",
 
@@ -166,22 +182,35 @@ object ShizukuHelper {
 
     suspend fun applyMaintenanceMode(): Boolean = withContext(Dispatchers.IO) {
         runCommands(listOf(
+            // Reiniciar servicios que se auto-levantan
             "am force-stop com.samsung.android.game.gos",
             "am force-stop com.samsung.android.game.gamehome",
-            "am force-stop com.samsung.android.game.gametools",
             "am force-stop com.samsung.android.bixby.agent",
             "am force-stop com.samsung.android.bixby.service",
+            "am force-stop com.samsung.android.forest",
+            "am force-stop com.samsung.android.wellbeing",
+            // Prioridad Free Fire
             "cmd activity set-standby-bucket com.dts.freefireth active",
             "cmd activity set-standby-bucket com.dts.freefiremaxob active",
+            // Animaciones y red
             "settings put global window_animation_scale 0",
             "settings put global transition_animation_scale 0",
             "settings put global animator_duration_scale 0",
             "settings put global wifi_scan_always_enabled 0",
             "settings put global sync_disabled 1",
             "settings put global nfc_on 0",
+            // AIM — re-confirmar cada 5 min (algunos servicios Samsung los revierten)
             "settings put system haptic_feedback_enabled 0",
             "settings put system sound_effects_enabled 0",
             "settings put system touch_sensitivity_mode 1",
+            "settings put system touch_blocking_period 0",
+            "settings put system touch_debounce_period 0",
+            "settings put system touch_smooth_mode 0",
+            "settings put system long_press_timeout 300",
+            "settings put secure assist_gesture_enabled 0",
+            "settings put global sem_mobile_security_engine 0",
+            "settings put global game_mode_intervention 0",
+            // Notificaciones y memoria
             "settings put global heads_up_notifications_enabled 0",
             "settings put global background_process_limit 2",
             "settings put global wifi_connected_mac_randomization_enabled 0",
@@ -297,12 +326,20 @@ object ShizukuHelper {
             "settings put system accidental_touch_protection 1",
             "settings put secure touch_exploration_enabled 0",
             "settings put secure spell_checker_enabled 1",
+            // Restaurar tiempos de toque
+            "settings put system long_press_timeout 400",
+            "settings put system multi_press_timeout 400",
+            // Restaurar asistente virtual
+            "settings put secure assist_gesture_enabled 1",
+            "settings put secure assist_gesture_wake 1",
+            "settings put secure double_tap_to_wake 1",
 
             // Paneles Samsung — restaurar panel lateral y tipeo lateral
             "settings put system edge_panels_enabled 1",
-            "settings put system edge_lighting_enabled 1",      // faltaba restaurar
-            "settings put system edge_typing_enabled 1",        // faltaba restaurar
+            "settings put system edge_lighting_enabled 1",
+            "settings put system edge_typing_enabled 1",
             "settings put system one_handed_mode_enabled 0",
+            "settings put system swipe_up_to_switch_apps_enabled 1",
             "settings put secure camera_double_tap_power_key_gesture_disabled 0",
             "settings put secure navigation_mode 2",
             "settings put global policy_control null",
@@ -311,7 +348,11 @@ object ShizukuHelper {
             "settings put global game_automatic_fps 1",
             "settings put system prevent_accidental_touch 1",
             "settings put global wifi_watchdog_on 1",
-            "settings put global device_idle_constants \"\"",   // faltaba limpiar
+            "settings put global device_idle_constants \"\"",
+            // Restaurar Samsung Security Engine
+            "settings put global sem_mobile_security_engine 1",
+            "settings put global game_mode_intervention 1",
+            "settings put global network_scoring_ui_enabled 1",
 
             // Notificaciones
             "settings put system notification_bubbles 1",
