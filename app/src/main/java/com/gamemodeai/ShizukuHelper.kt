@@ -46,28 +46,41 @@ object ShizukuHelper {
     suspend fun enableGameMode(): Boolean = withContext(Dispatchers.IO) {
         runCommands(
             listOf(
-                // Eliminar animaciones del sistema para menor lag
+                // ── Animaciones ──────────────────────────────────────────────
                 "settings put global window_animation_scale 0",
                 "settings put global transition_animation_scale 0",
                 "settings put global animator_duration_scale 0",
 
-                // Reducir lag táctil — mejora la estabilidad y respuesta del aim
-                "settings put system pointer_speed 0",
+                // ── Respuesta táctil (aim más estable y preciso) ──────────────
                 "settings put system haptic_feedback_enabled 0",
+                "settings put system pointer_speed 0",
+                "settings put system pointer_location 0",
 
-                // Evitar interrupciones durante el juego
+                // ── Sin interrupciones durante el juego ───────────────────────
                 "settings put global heads_up_notifications_enabled 0",
                 "settings put system sound_effects_enabled 0",
 
-                // Mantener WiFi activo sin cortes (evita micro-lags de red)
+                // ── Red estable (menos lag de conexión) ───────────────────────
                 "settings put global wifi_sleep_policy 2",
+                "settings put global mobile_data_always_on 1",
 
-                // Liberar RAM matando procesos en caché (más recursos para Free Fire)
+                // ── Liberar RAM: matar procesos en caché ──────────────────────
                 "am kill-all",
 
-                // Forzar renderizado por GPU (más suave y estable)
+                // ── Liberar RAM extra: destruir actividades inactivas ─────────
+                "settings put global always_finish_activities 1",
+
+                // ── Detener sincronización en segundo plano ───────────────────
+                "settings put global sync_disabled 1",
+
+                // ── Limitar procesos en segundo plano a 1 (solo Free Fire) ────
+                "settings put global background_process_limit 1",
+
+                // ── Renderizado por GPU ───────────────────────────────────────
                 "settings put global gpu_debug_layers_gles \"\"",
-                "settings put system hardware_accelerated_rendering 1"
+
+                // ── Segunda limpieza de RAM tras aplicar todo ─────────────────
+                "am kill-all"
             )
         )
     }
@@ -80,12 +93,24 @@ object ShizukuHelper {
                 "settings put global transition_animation_scale 1",
                 "settings put global animator_duration_scale 1",
 
-                // Restaurar configuración táctil
+                // Restaurar táctil
                 "settings put system haptic_feedback_enabled 1",
 
                 // Restaurar notificaciones
                 "settings put global heads_up_notifications_enabled 1",
-                "settings put system sound_effects_enabled 1"
+                "settings put system sound_effects_enabled 1",
+
+                // Restaurar actividades
+                "settings put global always_finish_activities 0",
+
+                // Restaurar sincronización
+                "settings put global sync_disabled 0",
+
+                // Restaurar procesos en segundo plano (por defecto Android = -1)
+                "settings put global background_process_limit -1",
+
+                // Restaurar red
+                "settings put global mobile_data_always_on 0"
             )
         )
     }
