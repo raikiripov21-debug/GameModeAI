@@ -54,6 +54,10 @@ object ShizukuHelper {
             "settings put system pointer_speed 0",
             "settings put system pointer_location 0",
             "settings put system show_touches 0",
+            // Sensibilidad táctil alta (Samsung) — menor lag entre dedo y pantalla
+            "settings put system touch_sensitivity_mode 1",
+            // Desactivar zoom de accesibilidad que puede interferir con el touch
+            "settings put secure accessibility_display_magnification_enabled 0",
 
             // ── 4. MEMORIA: liberar y congelar todo lo innecesario ────────────
             "am kill-all",
@@ -101,6 +105,7 @@ object ShizukuHelper {
 
             // Restaurar táctil
             "settings put system haptic_feedback_enabled 1",
+            "settings put system touch_sensitivity_mode 0",
 
             // Restaurar memoria
             "settings put global always_finish_activities 0",
