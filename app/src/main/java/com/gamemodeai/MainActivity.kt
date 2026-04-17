@@ -25,7 +25,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -63,16 +62,16 @@ fun getTotalRamMb(context: Context): Long {
     return info.totalMem / (1024 * 1024)
 }
 
-// ── Paleta de colores ────────────────────────────────────────────────────────
+// ── Paleta ───────────────────────────────────────────────────────────────────
 private val BgDark      = Color(0xFF0D0D0D)
 private val CardDark    = Color(0xFF181818)
 private val GreenBright = Color(0xFF00E676)
 private val GreenDark   = Color(0xFF00C853)
 private val RedBright   = Color(0xFFFF1744)
-private val BlueDark    = Color(0xFF1565C0)
 private val BlueAcc     = Color(0xFF42A5F5)
 private val YellowAcc   = Color(0xFFFFD600)
 private val PurpleAcc   = Color(0xFFCE93D8)
+private val OrangeAcc   = Color(0xFFFF9800)
 private val GreyText    = Color(0xFF9E9E9E)
 
 @Composable
@@ -87,7 +86,6 @@ fun GameModeScreen(
     val totalRam  = remember { getTotalRamMb(context) }
     var shizuku   by remember { mutableStateOf("Verificando...") }
 
-    // Verificar Shizuku al inicio
     LaunchedEffect(Unit) {
         shizuku = when {
             !ShizukuHelper.isShizukuAvailable() -> "No disponible"
@@ -97,7 +95,6 @@ fun GameModeScreen(
         ramFree = getAvailableRamMb(context)
     }
 
-    // Monitoreo de RAM en tiempo real mientras el modo está activo
     LaunchedEffect(isActive) {
         if (isActive) {
             while (isActive) {
@@ -114,10 +111,7 @@ fun GameModeScreen(
         else          -> RedBright
     }
 
-    Scaffold(
-        containerColor = BgDark,
-        modifier = Modifier.fillMaxSize()
-    ) { pad ->
+    Scaffold(containerColor = BgDark, modifier = Modifier.fillMaxSize()) { pad ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -129,11 +123,11 @@ fun GameModeScreen(
         ) {
             Spacer(Modifier.height(4.dp))
 
-            // ── Header ───────────────────────────────────────────────────────
+            // ── Header ────────────────────────────────────────────────────────
             Text("GameModeAI", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Text("Galaxy A06  ·  Free Fire", fontSize = 11.sp, color = GreyText)
 
-            // ── Tarjeta de estado ─────────────────────────────────────────────
+            // ── Estado ────────────────────────────────────────────────────────
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -147,69 +141,51 @@ fun GameModeScreen(
                     .padding(20.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text("MODO JUEGO", fontSize = 10.sp,
-                        color = Color.White.copy(alpha = 0.55f), fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.sp)
+                Column(horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("MODO JUEGO", fontSize = 10.sp, color = Color.White.copy(alpha = 0.55f),
+                        fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
                     if (isLoading) {
                         CircularProgressIndicator(color = GreenBright,
                             modifier = Modifier.size(28.dp), strokeWidth = 3.dp)
-                        Text("Optimizando sistema...", fontSize = 13.sp,
+                        Text("Aplicando optimizaciones...", fontSize = 13.sp,
                             color = Color.White.copy(alpha = 0.75f))
                     } else {
-                        Text(
-                            if (isActive) "● ACTIVO" else "○ INACTIVO",
+                        Text(if (isActive) "● ACTIVO" else "○ INACTIVO",
                             fontSize = 28.sp, fontWeight = FontWeight.Bold,
-                            color = if (isActive) GreenBright else GreyText
-                        )
-                        if (isActive) {
-                            Text("13 optimizaciones aplicadas · Aim estabilizado", fontSize = 12.sp,
-                                color = GreenBright.copy(alpha = 0.7f))
-                        }
+                            color = if (isActive) GreenBright else GreyText)
+                        if (isActive)
+                            Text("20 optimizaciones · Aim y A06 estabilizados",
+                                fontSize = 12.sp, color = GreenBright.copy(alpha = 0.7f))
                     }
                 }
             }
 
-            // ── RAM en tiempo real ────────────────────────────────────────────
-            Card(
-                modifier = Modifier.fillMaxWidth(),
+            // ── RAM ───────────────────────────────────────────────────────────
+            Card(modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = CardDark),
-                shape = RoundedCornerShape(16.dp)
-            ) {
+                shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
-
-                    Row(Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("RAM Libre", fontSize = 13.sp, color = GreyText)
-                        Text("$ramFree MB / $totalRam MB",
-                            fontSize = 13.sp, fontWeight = FontWeight.Bold, color = ramColor)
+                        Text("$ramFree MB / $totalRam MB", fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold, color = ramColor)
                     }
-
                     LinearProgressIndicator(
                         progress = { ramPct.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().height(6.dp)
-                            .clip(RoundedCornerShape(3.dp)),
-                        color = ramColor,
-                        trackColor = Color(0xFF2A2A2A)
-                    )
-
+                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                        color = ramColor, trackColor = Color(0xFF2A2A2A))
                     if (isActive && ramBefore > 0) {
                         val freed = ramFree - ramBefore
-                        val sign = if (freed >= 0) "+" else ""
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("RAM ganada al activar", fontSize = 12.sp, color = GreyText)
-                            Text("$sign$freed MB", fontSize = 12.sp,
+                            Text("RAM ganada", fontSize = 12.sp, color = GreyText)
+                            Text("${if (freed >= 0) "+" else ""}$freed MB", fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (freed >= 0) GreenBright else RedBright)
                         }
                     }
-
                     HorizontalDivider(color = Color(0xFF2A2A2A))
-
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Shizuku", fontSize = 12.sp, color = GreyText)
                         Text(shizuku, fontSize = 12.sp, fontWeight = FontWeight.Medium,
@@ -223,61 +199,59 @@ fun GameModeScreen(
                 }
             }
 
-            // ── Optimizaciones activas ─────────────────────────────────────────
+            // ── Secciones de optimización (solo cuando está activo) ───────────
             if (isActive) {
-                // Bloque AIM
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF12001F)),
-                    shape = RoundedCornerShape(16.dp)
+
+                // FALLOS SAMSUNG A06
+                OptCard(
+                    title = "FALLOS SAMSUNG A06 — CORREGIDOS",
+                    titleColor = OrangeAcc,
+                    bg = Color(0xFF1A0D00)
                 ) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(7.dp)) {
-
-                        Text("ESTABILIZACIÓN DE MIRA (AIM)", fontSize = 10.sp,
-                            color = PurpleAcc.copy(alpha = 0.85f), fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.5.sp)
-
-                        val aimOpts = listOf(
-                            "Rebotes táctiles eliminados → sin micro-saltos",
-                            "Debounce táctil en 0 → respuesta instantánea",
-                            "Eventos parásitos bloqueados → mira suave",
-                            "Frecuencia de pantalla fija 60 Hz → sin jitter",
-                            "Vibración desactivada → dedo más estable",
-                            "Zoom de accesibilidad desactivado",
-                            "Free Fire en máxima prioridad de proceso",
-                            "Renderizado GPU sin capas de debug"
-                        )
-                        aimOpts.forEach { AimItem(it) }
-                    }
+                    A06Item("Panel lateral desactivado → no se abre solo al borde")
+                    A06Item("Gestos de navegación → cambiados a 3 botones (sin conflicto con FF)")
+                    A06Item("Modo inmersivo forzado → barra de nav oculta permanente")
+                    A06Item("Cartel 'desliza para mostrar navbar' → eliminado")
+                    A06Item("Doble toque botón lateral → cámara desactivada")
+                    A06Item("Asistente de voz al mantener botón → desactivado")
+                    A06Item("Modo de una mano → desactivado")
+                    A06Item("Game Launcher Samsung → desactivado (no pausa el juego)")
+                    A06Item("Prevención toque accidental → OFF (no bloquea inputs)")
+                    A06Item("WiFi watchdog → OFF (sin cortes de red de 1-2 s)")
+                    A06Item("Doze del sistema → aplazado durante la partida")
+                    A06Item("CPU responsiveness Samsung mejorado")
                 }
 
-                // Bloque rendimiento general
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0D1B2A)),
-                    shape = RoundedCornerShape(16.dp)
+                // AIM
+                OptCard(
+                    title = "ESTABILIZACIÓN DE MIRA (AIM)",
+                    titleColor = PurpleAcc,
+                    bg = Color(0xFF12001F)
                 ) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    AimItem("Rebotes táctiles → 0 (sin micro-saltos)")
+                    AimItem("Debounce táctil → 0 ms (respuesta instantánea)")
+                    AimItem("Eventos táctiles parásitos bloqueados")
+                    AimItem("Frecuencia pantalla fija 60 Hz → sin jitter por cambio de Hz")
+                    AimItem("Vibración desactivada → dedo más estable sobre la mira")
+                    AimItem("Zoom accesibilidad → OFF (no altera coordenadas táctiles)")
+                    AimItem("Free Fire en máxima prioridad del scheduler")
+                    AimItem("GPU sin capas de debug → frames más consistentes")
+                }
 
-                        Text("RENDIMIENTO GENERAL", fontSize = 10.sp,
-                            color = BlueAcc.copy(alpha = 0.7f), fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.5.sp)
-
-                        val opts = listOf(
-                            "Animaciones eliminadas → 0 lag visual",
-                            "CPU en modo rendimiento máximo",
-                            "Apps en segundo plano congeladas",
-                            "Solo 1 proceso extra permitido",
-                            "Sincronización y GPS pausados",
-                            "WiFi estable, sin escaneos de red",
-                            "Notificaciones emergentes silenciadas",
-                            "RAM limpiada dos veces",
-                            "Mantenimiento del sistema aplazado"
-                        )
-                        opts.forEach { OptItem(it) }
-                    }
+                // RENDIMIENTO GENERAL
+                OptCard(
+                    title = "RENDIMIENTO GENERAL",
+                    titleColor = BlueAcc,
+                    bg = Color(0xFF0D1B2A)
+                ) {
+                    OptItem("Animaciones → 0 (cero lag visual)")
+                    OptItem("CPU en modo rendimiento máximo")
+                    OptItem("Apps en segundo plano congeladas")
+                    OptItem("Solo 1 proceso extra permitido")
+                    OptItem("Sincronización, GPS y notificaciones pausados")
+                    OptItem("WiFi estable sin escaneos")
+                    OptItem("RAM limpiada dos veces")
+                    OptItem("Mantenimiento del sistema aplazado")
                 }
             }
 
@@ -312,81 +286,92 @@ fun GameModeScreen(
                     disabledContainerColor = Color(0xFF2A2A2A)
                 )
             ) {
-                Text(
-                    when {
-                        isLoading -> "OPTIMIZANDO..."
-                        isActive  -> "DESACTIVAR MODO"
-                        else      -> "ACTIVAR MODO JUEGO"
-                    },
-                    fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White
-                )
+                Text(when {
+                    isLoading -> "OPTIMIZANDO..."
+                    isActive  -> "DESACTIVAR MODO"
+                    else      -> "ACTIVAR MODO JUEGO"
+                }, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
 
-            // ── Sensibilidad recomendada para AIM ────────────────────────────
-            Card(
-                modifier = Modifier.fillMaxWidth(),
+            // ── Sensibilidad recomendada ──────────────────────────────────────
+            Card(modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF12001F)),
-                shape = RoundedCornerShape(16.dp)
-            ) {
+                shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp)) {
-
-                    Text("SENSIBILIDAD RECOMENDADA · GALAXY A06",
-                        fontSize = 10.sp, color = PurpleAcc.copy(alpha = 0.8f),
-                        fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-
-                    Text("Para mira suave sin micro-saltos:", fontSize = 12.sp,
+                    Text("SENSIBILIDAD RECOMENDADA · GALAXY A06", fontSize = 10.sp,
+                        color = PurpleAcc.copy(alpha = 0.8f), fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.5.sp)
+                    Text("Mira suave, sin micro-saltos:", fontSize = 12.sp,
                         color = Color.White.copy(alpha = 0.6f))
-
-                    SensRow("General",           "85 – 95")
-                    SensRow("Punto rojo / Mira", "90 – 100")
-                    SensRow("Vista 2x",          "65 – 75")
-                    SensRow("Vista 4x",          "45 – 55")
-                    SensRow("Francotirador",     "20 – 30")
-
+                    SensRow("General",            "85 – 95")
+                    SensRow("Punto rojo / Mira",  "90 – 100")
+                    SensRow("Vista 2x",           "65 – 75")
+                    SensRow("Vista 4x",           "45 – 55")
+                    SensRow("Francotirador",      "20 – 30")
                     HorizontalDivider(color = Color(0xFF2A2A2A))
-
-                    Text("En Free Fire: Gráficos → Suave · Velocidad → Máxima\n" +
-                         "Desactivar: efectos clima, sangre y sombras de personaje",
-                        fontSize = 11.sp, color = PurpleAcc.copy(alpha = 0.6f))
+                    Text("Gráficos: Suave · Velocidad: Máxima\nDesactivar sombras, clima y efectos de sangre",
+                        fontSize = 11.sp, color = PurpleAcc.copy(alpha = 0.55f))
                 }
             }
 
-            // ── Consejos antes de jugar ────────────────────────────────────────
-            Card(
-                modifier = Modifier.fillMaxWidth(),
+            // ── Tips antes de jugar ───────────────────────────────────────────
+            Card(modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1200)),
-                shape = RoundedCornerShape(16.dp)
-            ) {
+                shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.fillMaxWidth().padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(7.dp)) {
-
-                    Text("ANTES DE CADA PARTIDA",
-                        fontSize = 10.sp, color = YellowAcc.copy(alpha = 0.8f),
-                        fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-
-                    TipItem("Activa esta app primero, luego abre Free Fire")
-                    TipItem("Cierra todas las apps del historial")
+                    Text("ANTES DE CADA PARTIDA", fontSize = 10.sp,
+                        color = YellowAcc.copy(alpha = 0.8f), fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.5.sp)
+                    TipItem("Activa esta app PRIMERO, luego abre Free Fire")
+                    TipItem("Cierra todas las apps del historial reciente")
                     TipItem("Activa modo avión y desactívalo (ping más limpio)")
                     TipItem("Carga mínimo al 50 % de batería")
-                    TipItem("No toques la pantalla con dos dedos al levantar la mira")
+                    TipItem("No uses dos dedos al levantar la mira — causa salto")
                 }
             }
 
-            Text(
-                "Activa ANTES de abrir Free Fire · Galaxy A06",
+            Text("Activa ANTES de abrir Free Fire · Galaxy A06",
                 fontSize = 10.sp, color = GreyText.copy(alpha = 0.5f),
-                textAlign = TextAlign.Center
-            )
+                textAlign = TextAlign.Center)
             Spacer(Modifier.height(6.dp))
         }
     }
 }
 
+// ── Componentes reutilizables ─────────────────────────────────────────────────
+
+@Composable
+private fun OptCard(
+    title: String,
+    titleColor: Color,
+    bg: Color,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = bg),
+        shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text(title, fontSize = 10.sp, color = titleColor.copy(alpha = 0.85f),
+                fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            content()
+        }
+    }
+}
+
+@Composable
+private fun A06Item(text: String) {
+    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("⚡", fontSize = 11.sp, color = OrangeAcc)
+        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f))
+    }
+}
+
 @Composable
 private fun AimItem(text: String) {
-    Row(verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("◈", fontSize = 12.sp, color = PurpleAcc)
         Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f))
     }
@@ -394,8 +379,7 @@ private fun AimItem(text: String) {
 
 @Composable
 private fun OptItem(text: String) {
-    Row(verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("✓", fontSize = 12.sp, color = GreenBright)
         Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f))
     }
@@ -403,8 +387,7 @@ private fun OptItem(text: String) {
 
 @Composable
 private fun TipItem(text: String) {
-    Row(verticalAlignment = Alignment.Top,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("›", fontSize = 13.sp, color = YellowAcc)
         Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
     }
