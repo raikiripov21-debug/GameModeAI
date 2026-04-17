@@ -7,7 +7,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,6 +30,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -85,6 +90,13 @@ fun GameModeScreen(
     var ramBefore by remember { mutableStateOf(0L) }
     val totalRam  = remember { getTotalRamMb(context) }
     var shizuku   by remember { mutableStateOf("Verificando...") }
+
+    // Sensibilidades guardadas
+    var sensGeneral by remember { mutableIntStateOf(Prefs.getSensGeneral(context)) }
+    var sensRedDot  by remember { mutableIntStateOf(Prefs.getSensRedDot(context)) }
+    var sens2x      by remember { mutableIntStateOf(Prefs.getSens2x(context)) }
+    var sens4x      by remember { mutableIntStateOf(Prefs.getSens4x(context)) }
+    var sensSniper  by remember { mutableIntStateOf(Prefs.getSensSniper(context)) }
 
     LaunchedEffect(Unit) {
         shizuku = when {
@@ -199,51 +211,109 @@ fun GameModeScreen(
                 }
             }
 
-            // ── Secciones de optimización (solo cuando está activo) ───────────
+            // ── SLIDERS DE SENSIBILIDAD ───────────────────────────────────────
+            Card(modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF12001F)),
+                shape = RoundedCornerShape(16.dp)) {
+                Column(Modifier.fillMaxWidth().padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically) {
+                        Text("SENSIBILIDAD DE MIRA", fontSize = 10.sp,
+                            color = PurpleAcc.copy(alpha = 0.85f), fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.5.sp)
+                        Text("Galaxy A06", fontSize = 10.sp, color = GreyText)
+                    }
+
+                    Text("Ajusta y usa estos valores en Free Fire",
+                        fontSize = 11.sp, color = Color.White.copy(alpha = 0.45f))
+
+                    Spacer(Modifier.height(6.dp))
+
+                    SensSlider(
+                        label    = "General",
+                        hint     = "rec. 85–95",
+                        value    = sensGeneral,
+                        min      = 60, max = 100,
+                        color    = PurpleAcc,
+                        onChange = { sensGeneral = it; Prefs.setSensGeneral(context, it) }
+                    )
+                    SensSlider(
+                        label    = "Punto rojo / Mira",
+                        hint     = "rec. 90–100",
+                        value    = sensRedDot,
+                        min      = 70, max = 100,
+                        color    = RedBright,
+                        onChange = { sensRedDot = it; Prefs.setSensRedDot(context, it) }
+                    )
+                    SensSlider(
+                        label    = "Vista 2x",
+                        hint     = "rec. 65–75",
+                        value    = sens2x,
+                        min      = 40, max = 90,
+                        color    = BlueAcc,
+                        onChange = { sens2x = it; Prefs.setSens2x(context, it) }
+                    )
+                    SensSlider(
+                        label    = "Vista 4x",
+                        hint     = "rec. 45–55",
+                        value    = sens4x,
+                        min      = 20, max = 70,
+                        color    = YellowAcc,
+                        onChange = { sens4x = it; Prefs.setSens4x(context, it) }
+                    )
+                    SensSlider(
+                        label    = "Francotirador",
+                        hint     = "rec. 20–30",
+                        value    = sensSniper,
+                        min      = 5, max = 50,
+                        color    = OrangeAcc,
+                        onChange = { sensSniper = it; Prefs.setSensSniper(context, it) }
+                    )
+
+                    Spacer(Modifier.height(4.dp))
+                    HorizontalDivider(color = Color(0xFF2A2A2A))
+                    Spacer(Modifier.height(4.dp))
+
+                    Text(
+                        "Tip: si la mira salta mucho al levantar, baja el General 5 puntos.\n" +
+                        "Si va lenta, súbelo 5. Guarda y prueba en sala de entrenamiento.",
+                        fontSize = 11.sp, color = PurpleAcc.copy(alpha = 0.5f)
+                    )
+                }
+            }
+
+            // ── Optimizaciones activas ────────────────────────────────────────
             if (isActive) {
 
-                // FALLOS SAMSUNG A06
-                OptCard(
-                    title = "FALLOS SAMSUNG A06 — CORREGIDOS",
-                    titleColor = OrangeAcc,
-                    bg = Color(0xFF1A0D00)
-                ) {
-                    A06Item("Panel lateral desactivado → no se abre solo al borde")
-                    A06Item("Gestos de navegación → cambiados a 3 botones (sin conflicto con FF)")
-                    A06Item("Modo inmersivo forzado → barra de nav oculta permanente")
+                OptCard("FALLOS SAMSUNG A06 — CORREGIDOS", OrangeAcc, Color(0xFF1A0D00)) {
+                    A06Item("Panel lateral → desactivado (no se abre solo al borde)")
+                    A06Item("Gestos navegación → 3 botones (sin conflicto con FF)")
+                    A06Item("Modo inmersivo forzado → barra de nav oculta")
                     A06Item("Cartel 'desliza para mostrar navbar' → eliminado")
                     A06Item("Doble toque botón lateral → cámara desactivada")
                     A06Item("Asistente de voz al mantener botón → desactivado")
                     A06Item("Modo de una mano → desactivado")
-                    A06Item("Game Launcher Samsung → desactivado (no pausa el juego)")
-                    A06Item("Prevención toque accidental → OFF (no bloquea inputs)")
-                    A06Item("WiFi watchdog → OFF (sin cortes de red de 1-2 s)")
+                    A06Item("Game Launcher Samsung → desactivado")
+                    A06Item("Prevención toque accidental → OFF")
+                    A06Item("WiFi watchdog → OFF (sin cortes de 1-2 s)")
                     A06Item("Doze del sistema → aplazado durante la partida")
                     A06Item("CPU responsiveness Samsung mejorado")
                 }
 
-                // AIM
-                OptCard(
-                    title = "ESTABILIZACIÓN DE MIRA (AIM)",
-                    titleColor = PurpleAcc,
-                    bg = Color(0xFF12001F)
-                ) {
+                OptCard("ESTABILIZACIÓN DE MIRA (AIM)", PurpleAcc, Color(0xFF12001F)) {
                     AimItem("Rebotes táctiles → 0 (sin micro-saltos)")
                     AimItem("Debounce táctil → 0 ms (respuesta instantánea)")
                     AimItem("Eventos táctiles parásitos bloqueados")
-                    AimItem("Frecuencia pantalla fija 60 Hz → sin jitter por cambio de Hz")
-                    AimItem("Vibración desactivada → dedo más estable sobre la mira")
-                    AimItem("Zoom accesibilidad → OFF (no altera coordenadas táctiles)")
+                    AimItem("Frecuencia pantalla fija 60 Hz → sin jitter")
+                    AimItem("Vibración desactivada → dedo más estable")
+                    AimItem("Zoom accesibilidad → OFF")
                     AimItem("Free Fire en máxima prioridad del scheduler")
-                    AimItem("GPU sin capas de debug → frames más consistentes")
+                    AimItem("GPU sin capas de debug")
                 }
 
-                // RENDIMIENTO GENERAL
-                OptCard(
-                    title = "RENDIMIENTO GENERAL",
-                    titleColor = BlueAcc,
-                    bg = Color(0xFF0D1B2A)
-                ) {
+                OptCard("RENDIMIENTO GENERAL", BlueAcc, Color(0xFF0D1B2A)) {
                     OptItem("Animaciones → 0 (cero lag visual)")
                     OptItem("CPU en modo rendimiento máximo")
                     OptItem("Apps en segundo plano congeladas")
@@ -293,28 +363,6 @@ fun GameModeScreen(
                 }, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
 
-            // ── Sensibilidad recomendada ──────────────────────────────────────
-            Card(modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF12001F)),
-                shape = RoundedCornerShape(16.dp)) {
-                Column(Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("SENSIBILIDAD RECOMENDADA · GALAXY A06", fontSize = 10.sp,
-                        color = PurpleAcc.copy(alpha = 0.8f), fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.5.sp)
-                    Text("Mira suave, sin micro-saltos:", fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.6f))
-                    SensRow("General",            "85 – 95")
-                    SensRow("Punto rojo / Mira",  "90 – 100")
-                    SensRow("Vista 2x",           "65 – 75")
-                    SensRow("Vista 4x",           "45 – 55")
-                    SensRow("Francotirador",      "20 – 30")
-                    HorizontalDivider(color = Color(0xFF2A2A2A))
-                    Text("Gráficos: Suave · Velocidad: Máxima\nDesactivar sombras, clima y efectos de sangre",
-                        fontSize = 11.sp, color = PurpleAcc.copy(alpha = 0.55f))
-                }
-            }
-
             // ── Tips antes de jugar ───────────────────────────────────────────
             Card(modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1A1200)),
@@ -337,6 +385,51 @@ fun GameModeScreen(
                 textAlign = TextAlign.Center)
             Spacer(Modifier.height(6.dp))
         }
+    }
+}
+
+// ── Slider de sensibilidad ────────────────────────────────────────────────────
+
+@Composable
+private fun SensSlider(
+    label: String,
+    hint: String,
+    value: Int,
+    min: Int,
+    max: Int,
+    color: Color,
+    onChange: (Int) -> Unit
+) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(label, fontSize = 13.sp, color = Color.White, fontWeight = FontWeight.Medium)
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(hint, fontSize = 10.sp, color = GreyText)
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(color.copy(alpha = 0.18f))
+                        .padding(horizontal = 10.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("$value", fontSize = 15.sp, fontWeight = FontWeight.Bold, color = color)
+                }
+            }
+        }
+        Slider(
+            value = value.toFloat(),
+            onValueChange = { onChange(it.roundToInt()) },
+            valueRange = min.toFloat()..max.toFloat(),
+            steps = (max - min) - 1,
+            modifier = Modifier.fillMaxWidth(),
+            colors = SliderDefaults.colors(
+                thumbColor = color,
+                activeTrackColor = color,
+                inactiveTrackColor = Color(0xFF2A2A2A)
+            )
+        )
     }
 }
 
@@ -390,14 +483,6 @@ private fun TipItem(text: String) {
     Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("›", fontSize = 13.sp, color = YellowAcc)
         Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
-    }
-}
-
-@Composable
-private fun SensRow(label: String, value: String) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, fontSize = 13.sp, color = Color.White.copy(alpha = 0.75f))
-        Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = PurpleAcc)
     }
 }
 
