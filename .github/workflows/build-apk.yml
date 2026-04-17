@@ -19,16 +19,27 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: gradle
 
       - name: Permisos a Gradle
         run: chmod +x gradlew
 
       - name: Compilar APK Debug
-        run: ./gradlew assembleDebug --no-daemon
+        run: ./gradlew assembleDebug --no-daemon --build-cache
 
-      - name: Subir APK
+      - name: Subir APK Debug
         uses: actions/upload-artifact@v4
         with:
           name: GameModeAI-debug
           path: app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 7
+          retention-days: 14
+
+      - name: Compilar APK Release (sin firmar)
+        run: ./gradlew assembleRelease --no-daemon --build-cache
+
+      - name: Subir APK Release (sin firmar)
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameModeAI-release-unsigned
+          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          retention-days: 14
