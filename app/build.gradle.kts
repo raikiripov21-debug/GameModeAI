@@ -8,7 +8,7 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.gamemodeai.a06"
+        applicationId = "com.gamemodeai"
         minSdk = 24
         targetSdk = 35
         versionCode = 3
