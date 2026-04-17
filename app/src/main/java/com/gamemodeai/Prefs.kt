@@ -9,7 +9,6 @@ object Prefs {
     private const val KEY_LONG_START_MS = "long_game_start_ms"
     private const val KEY_PHASE2_ACTIVE = "long_game_phase2_active"
 
-    // ── Modo activo ───────────────────────────────────────────────────────────
     fun isActive(context: Context): Boolean =
         prefs(context).getBoolean(KEY_ACTIVE, false)
 
@@ -18,7 +17,6 @@ object Prefs {
         if (!active) clearLongGame(context)
     }
 
-    // ── Partida larga / Fase 2 ────────────────────────────────────────────────
     fun startLongGame(context: Context) {
         prefs(context).edit()
             .putLong(KEY_LONG_START_MS, System.currentTimeMillis())
@@ -41,7 +39,6 @@ object Prefs {
             .remove(KEY_PHASE2_ACTIVE)
             .apply()
 
-    // ─────────────────────────────────────────────────────────────────────────
     private fun prefs(context: Context) =
         context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 }
