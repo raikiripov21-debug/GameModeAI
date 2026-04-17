@@ -1,44 +1,22 @@
-# ══════════════════════════════════════════════════════════════════════════════
-# ProGuard rules para GameModeAI
-# ══════════════════════════════════════════════════════════════════════════════
+# GameModeAI — ProGuard rules
 
-# --- Shizuku — usa Binder IPC y reflexión interna ---
+# Shizuku
 -keep class rikka.shizuku.** { *; }
 -keep class moe.shizuku.** { *; }
--dontwarn rikka.shizuku.**
--dontwarn moe.shizuku.**
 
-# --- Kotlin ---
--keep class kotlin.** { *; }
--keep class kotlin.Metadata { *; }
--dontwarn kotlin.**
--keepclassmembers class **$WhenMappings { <fields>; }
--keepclassmembers class kotlin.Lazy { *; }
+# Mantener clases principales de la app
+-keep class com.gamemodeai.** { *; }
 
-# --- Kotlin Coroutines ---
--keepnames class kotlinx.coroutines.internal.MainDispatcherFactory {}
--keepnames class kotlinx.coroutines.CoroutineExceptionHandler {}
--keepclassmembernames class kotlinx.** {
-    volatile <fields>;
-}
--dontwarn kotlinx.coroutines.**
-
-# --- Compose ---
--keep class androidx.compose.** { *; }
+# Compose
 -dontwarn androidx.compose.**
--keep class androidx.lifecycle.** { *; }
+-keep class androidx.compose.** { *; }
 
-# --- Android / Parcelable ---
--keepclassmembers class * implements android.os.Parcelable {
-    public static final android.os.Parcelable$Creator CREATOR;
-}
+# Kotlin
+-keep class kotlin.** { *; }
+-keep class kotlinx.coroutines.** { *; }
 
-# --- Atributos de depuración (stack traces legibles) ---
+# Android
 -keepattributes *Annotation*
 -keepattributes SourceFile,LineNumberTable
--renamesourcefileattribute SourceFile
-
-# --- General WebView (por si acaso) ---
--keepclassmembers class * {
-    @android.webkit.JavascriptInterface <methods>;
-}
+-keepattributes Signature
+-keepattributes Exceptions
