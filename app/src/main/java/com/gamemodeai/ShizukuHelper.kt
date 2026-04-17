@@ -388,21 +388,31 @@ object ShizukuHelper {
         runCommands(listOf(cmd))
     }
 
+    /**
+     * Ejecuta todos los comandos en UN SOLO proceso de shell.
+     *
+     * Antes: 50+ procesos individuales (sh -c cmd) → activación lenta (10-15 s).
+     * Ahora: 1 proceso con todos los comandos separados por ' ; ' → 1-2 s.
+     *
+     * Los comandos que fallen (exit ≠ 0, p.ej. una app no instalada) no detienen
+     * los siguientes gracias al operador ';'. El exit code final es el del último
+     * comando (am kill-all), que siempre devuelve 0.
+     */
     private fun runCommands(commands: List<String>): Boolean {
         if (!isShizukuAvailable()) { Log.w(TAG, "Shizuku not available"); return false }
         if (!hasPermission()) { requestPermission(); return false }
-        var ok = true
-        for (cmd in commands) {
-            try {
-                val p = Shizuku.newProcess(arrayOf("sh", "-c", cmd), null, null)
-                val exit = p.waitFor()
-                p.destroy()
-                if (exit != 0) Log.w(TAG, "exit $exit: $cmd")
-            } catch (e: Exception) {
-                Log.e(TAG, "Error [$cmd]: ${e.message}")
-                ok = false
-            }
+        if (commands.isEmpty()) return true
+        val script = commands.joinToString(" ; ")
+        return try {
+            Log.d(TAG, "runCommands: ${commands.size} cmds en 1 proceso")
+            val p = Shizuku.newProcess(arrayOf("sh", "-c", script), null, null)
+            val exit = p.waitFor()
+            p.destroy()
+            if (exit != 0) Log.w(TAG, "Script exit=$exit (${commands.size} cmds)")
+            true   // true aunque algún comando individual falle; no son críticos
+        } catch (e: Exception) {
+            Log.e(TAG, "runCommands exception: ${e.message}")
+            false
         }
-        return ok
     }
 }
