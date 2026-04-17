@@ -271,7 +271,7 @@ fun GameModeScreen(
             }
 
             // ── SHIZUKU NO DISPONIBLE — instrucciones paso a paso ────────────
-            if (shizuku == "No disponible") {
+            if (shizuku == "No disponible" || shizuku == "Verificando...") {
                 Card(modifier = Modifier.fillMaxWidth(),
                     colors = CardDefaults.cardColors(containerColor = Color(0xFF1A0000)),
                     shape = RoundedCornerShape(14.dp)) {
@@ -284,7 +284,22 @@ fun GameModeScreen(
                         SetupStep("1", "Instala Shizuku desde Play Store")
                         SetupStep("2", "Abre Shizuku y toca 'Iniciar mediante ADB inalámbrico' (Android 11+) o 'Iniciar mediante root'")
                         SetupStep("3", "Sigue las instrucciones en pantalla de Shizuku")
-                        SetupStep("4", "Vuelve aquí — la app detectará Shizuku automáticamente")
+                        SetupStep("4", "Ya listo? Toca el botón de abajo para verificar")
+                        Button(
+                            onClick = {
+                                shizuku = when {
+                                    !ShizukuHelper.isShizukuAvailable() -> "No disponible"
+                                    !ShizukuHelper.hasPermission()       -> "Sin permiso"
+                                    else                                  -> "Listo"
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3D0000))
+                        ) {
+                            Text("Verificar estado de Shizuku",
+                                fontSize = 13.sp, color = RedBright, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }
@@ -633,6 +648,36 @@ fun GameModeScreen(
                     isActive  -> "DESACTIVAR MODO JUEGO"
                     else      -> "ACTIVAR MODO JUEGO"
                 }, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            }
+
+            // ── Botón secundario: Limpiar RAM manualmente ─────────────────────
+            if (isActive) {
+                val coroutineScope = rememberCoroutineScope()
+                var ramCleaning by remember { mutableStateOf(false) }
+                OutlinedButton(
+                    onClick = {
+                        if (!ramCleaning) {
+                            coroutineScope.launch {
+                                ramCleaning = true
+                                ShizukuHelper.run("am kill-all")
+                                delay(800L)
+                                ramFree = getAvailableRamMb(context)
+                                ramCleaning = false
+                            }
+                        }
+                    },
+                    enabled = !ramCleaning,
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    shape = RoundedCornerShape(12.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, TealAcc.copy(alpha = 0.5f))
+                ) {
+                    Text(
+                        if (ramCleaning) "Limpiando RAM..." else "Limpiar RAM ahora",
+                        fontSize = 13.sp,
+                        color = if (ramCleaning) Color.White.copy(alpha = 0.4f) else TealAcc,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
             }
 
             // ── Tips ──────────────────────────────────────────────────────────
