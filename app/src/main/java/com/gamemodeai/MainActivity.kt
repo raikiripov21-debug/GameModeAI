@@ -51,7 +51,6 @@ class MainActivity : ComponentActivity() {
             GameModeAITheme {
                 GameModeScreen(
                     context = this,
-                    resumeTick = _resumeCount.intValue,
                     onToggle = { activate, onResult ->
                         lifecycleScope.launch {
                             val success = if (activate) ShizukuHelper.enableGameMode()
@@ -138,7 +137,6 @@ private val GreyText    = Color(0xFF757575)
 @Composable
 fun GameModeScreen(
     context: Context,
-    resumeTick: Int = 0,
     onToggle: (Boolean, (Boolean) -> Unit) -> Unit
 ) {
     var isActive     by remember { mutableStateOf(Prefs.isActive(context)) }
@@ -198,15 +196,19 @@ fun GameModeScreen(
         }
     }
 
-    LaunchedEffect(resumeTick) {
-        shizuku = when {
-            !ShizukuHelper.isShizukuAvailable() -> "No disponible"
-            !ShizukuHelper.hasPermission()       -> "Sin permiso"
-            else                                  -> "Listo"
+    // Shizuku/batería se re-verifican cada 5 s (detecta activación sin reiniciar app)
+    LaunchedEffect(Unit) {
+        while (true) {
+            shizuku = when {
+                !ShizukuHelper.isShizukuAvailable() -> "No disponible"
+                !ShizukuHelper.hasPermission()       -> "Sin permiso"
+                else                                  -> "Listo"
+            }
+            ramFree    = getAvailableRamMb(context)
+            batteryPct = getBatteryLevel(context)
+            charging   = isCharging(context)
+            delay(5_000L)
         }
-        ramFree    = getAvailableRamMb(context)
-        batteryPct = getBatteryLevel(context)
-        charging   = isCharging(context)
     }
 
     // Lectura de batería cada 30 segundos en segundo plano
