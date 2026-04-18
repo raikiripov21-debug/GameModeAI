@@ -64,7 +64,14 @@ class GameService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         monitorJob?.cancel()
 
-        // Solo registrar tiempo de inicio si no hay uno ya (evita resetear el contador
+        // Mantenimiento inmediato al arrancar: re-aplica ajustes críticos
+          // sin esperar 5 minutos. Útil tras reinicio del servicio o del teléfono.
+          serviceScope.launch {
+              delay(4_000L)   // esperar 4 s a que Shizuku esté listo
+              ShizukuHelper.applyMaintenanceMode()
+          }
+
+          // Solo registrar tiempo de inicio si no hay uno ya (evita resetear el contador
         // cuando Android reinicia el servicio con START_STICKY después de matarlo).
         val alreadyRunning = Prefs.getLongGameStartMs(this) > 0L
         if (!alreadyRunning) {
