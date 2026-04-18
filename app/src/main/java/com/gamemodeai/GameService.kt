@@ -19,6 +19,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
+import java.util.concurrent.atomic.AtomicBoolean
 
 class GameService : Service() {
 
@@ -43,6 +44,9 @@ class GameService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private lateinit var notificationManager: NotificationManager
     private var monitorJob: Job? = null
+    private var aotJob:     Job? = null
+    // true mientras la compilación AOT de Free Fire esté en curso
+    private val aotRunning  = AtomicBoolean(false)
     // WakeLock parcial: evita que el Exynos 850 del A06 entre en deep sleep
     // mientras el servicio aplica el mantenimiento cada 5 minutos.
     private var wakeLock: PowerManager.WakeLock? = null
@@ -65,6 +69,20 @@ class GameService : Service() {
         val alreadyRunning = Prefs.getLongGameStartMs(this) > 0L
         if (!alreadyRunning) {
             Prefs.startLongGame(this)
+        }
+
+        // Compilación AOT de Free Fire en background (no bloquea la activación).
+        // Primera vez: 30-90 s compilando DEX → ARM nativo (elimina picos JIT durante aim).
+        // Activaciones posteriores: <2 s (ya compilado, no rehace el trabajo).
+        aotJob?.cancel()
+        aotJob = serviceScope.launch {
+            aotRunning.set(true)
+            notificationManager.notify(NOTIFICATION_ID,
+                buildNotification(phase2 = false, minLeft = 20, aotRunning = true))
+            ShizukuHelper.optimizeFreeFireAOT()
+            aotRunning.set(false)
+            notificationManager.notify(NOTIFICATION_ID,
+                buildNotification(phase2 = false, minLeft = 20, aotRunning = false))
         }
 
         monitorJob = serviceScope.launch {
@@ -123,6 +141,7 @@ class GameService : Service() {
 
     override fun onDestroy() {
         super.onDestroy()
+        aotJob?.cancel()
         monitorJob?.cancel()
         serviceScope.cancel()
         Prefs.clearLongGame(this)
@@ -143,7 +162,11 @@ class GameService : Service() {
     }
 
     // ── Notificación ──────────────────────────────────────────────────────────
-    private fun buildNotification(phase2: Boolean, minLeft: Int): Notification {
+    private fun buildNotification(
+        phase2: Boolean,
+        minLeft: Int,
+        aotRunning: Boolean = this.aotRunning.get()
+    ): Notification {
         val pi = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
@@ -155,12 +178,12 @@ class GameService : Service() {
         else
             "GameModeAI activo"
 
-        val text = if (phase2)
-            "Brillo y CPU reducidos para mantener temp baja"
-        else if (minLeft > 1)
-            "Fase 2 térmica en $minLeft min · aim y rendimiento optimizados"
-        else
-            "Fase 2 térmica en $minLeft min · casi lista!"
+        val text = when {
+            aotRunning  -> "Compilando Free Fire (AOT)… aim más estable al terminar"
+            phase2      -> "Brillo y CPU reducidos para mantener temp baja"
+            minLeft > 1 -> "Fase 2 térmica en $minLeft min · aim y rendimiento optimizados"
+            else        -> "Fase 2 térmica en $minLeft min · casi lista!"
+        }
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
