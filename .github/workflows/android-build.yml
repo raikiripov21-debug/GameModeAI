@@ -1,0 +1,216 @@
+name: Android Build — GameMode AI (All Devices)
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+    inputs:
+      device:
+        description: 'Dispositivo objetivo'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - samsung-a06
+          - samsung-a26
+          - moto-g04s
+
+permissions:
+  contents: write
+
+jobs:
+  build-samsung-a06:
+    name: 'Build APK — Samsung Galaxy A06'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    if: ${{ github.event.inputs.device == 'all' || github.event.inputs.device == 'samsung-a06' || github.event_name == 'push' }}
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Cache Gradle (A06)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-a06-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-a06-
+            ${{ runner.os }}-gradle-
+
+      - name: Permisos Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Compilar APK Debug (A06)
+        run: |
+          ./gradlew assembleDebug \
+            -PversionCode=${{ github.run_number }} \
+            -PdeviceTarget=samsung-a06 \
+            --no-daemon \
+            --build-cache \
+            --stacktrace
+
+      - name: Subir APK Debug (A06)
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameModeAI-SamsungA06-debug-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Compilar APK Release (A06)
+        run: |
+          ./gradlew assembleRelease \
+            -PversionCode=${{ github.run_number }} \
+            -PdeviceTarget=samsung-a06 \
+            --no-daemon \
+            --build-cache \
+            --stacktrace
+
+      - name: Subir APK Release (A06)
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameModeAI-SamsungA06-release-${{ github.run_number }}
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
+          if-no-files-found: warn
+
+  build-samsung-a26:
+    name: 'Build APK — Samsung Galaxy A26'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    if: ${{ github.event.inputs.device == 'all' || github.event.inputs.device == 'samsung-a26' || github.event_name == 'push' }}
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Cache Gradle (A26)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-a26-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-a26-
+            ${{ runner.os }}-gradle-
+
+      - name: Permisos Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Compilar APK Debug (A26)
+        run: |
+          ./gradlew assembleDebug \
+            -PversionCode=${{ github.run_number }} \
+            -PdeviceTarget=samsung-a26 \
+            --no-daemon \
+            --build-cache \
+            --stacktrace
+
+      - name: Subir APK Debug (A26)
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameModeAI-SamsungA26-debug-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Compilar APK Release (A26)
+        run: |
+          ./gradlew assembleRelease \
+            -PversionCode=${{ github.run_number }} \
+            -PdeviceTarget=samsung-a26 \
+            --no-daemon \
+            --build-cache \
+            --stacktrace
+
+      - name: Subir APK Release (A26)
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameModeAI-SamsungA26-release-${{ github.run_number }}
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
+          if-no-files-found: warn
+
+  build-moto-g04s:
+    name: 'Build APK — Motorola Moto G04s'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    if: ${{ github.event.inputs.device == 'all' || github.event.inputs.device == 'moto-g04s' || github.event_name == 'push' }}
+
+    steps:
+      - name: Checkout código
+        uses: actions/checkout@v4
+
+      - name: Configurar JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Cache Gradle (G04s)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-g04s-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-g04s-
+            ${{ runner.os }}-gradle-
+
+      - name: Permisos Gradle wrapper
+        run: chmod +x gradlew
+
+      - name: Compilar APK Debug (G04s)
+        run: |
+          ./gradlew assembleDebug \
+            -PversionCode=${{ github.run_number }} \
+            -PdeviceTarget=moto-g04s \
+            --no-daemon \
+            --build-cache \
+            --stacktrace
+
+      - name: Subir APK Debug (G04s)
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameModeAI-MotoG04s-debug-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Compilar APK Release (G04s)
+        run: |
+          ./gradlew assembleRelease \
+            -PversionCode=${{ github.run_number }} \
+            -PdeviceTarget=moto-g04s \
+            --no-daemon \
+            --build-cache \
+            --stacktrace
+
+      - name: Subir APK Release (G04s)
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameModeAI-MotoG04s-release-${{ github.run_number }}
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 30
+          if-no-files-found: warn
