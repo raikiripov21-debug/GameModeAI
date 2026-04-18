@@ -37,7 +37,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Compilar APK Debug
-        run: ./gradlew assembleDebug --no-daemon --build-cache
+        run: ./gradlew assembleDebug -PversionCode=${{ github.run_number }} --no-daemon --build-cache
 
       - name: Subir APK Debug
         uses: actions/upload-artifact@v4
@@ -47,14 +47,26 @@ jobs:
           retention-days: 14
 
       - name: Compilar APK Release (sin firmar)
-        run: ./gradlew assembleRelease --no-daemon --build-cache
+        run: ./gradlew assembleRelease -PversionCode=${{ github.run_number }} --no-daemon --build-cache
 
-      - name: Subir APK Release
+      - name: Subir APK Release (artifact)
         uses: actions/upload-artifact@v4
         with:
           name: GameModeAI-A06-release-${{ github.run_number }}
           path: app/build/outputs/apk/release/*.apk
           retention-days: 30
+
+      # Solo en push a main: crea un GitHub Release público con el APK
+      # Esto permite que la app descargue actualizaciones directamente
+      - name: Crear GitHub Release con APK
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          gh release create "v${{ github.run_number }}" \
+            --title "GameModeAI v${{ github.run_number }}" \
+            --notes "Build automático #${{ github.run_number }} — instala directo desde la app" \
+            app/build/outputs/apk/release/*.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Mostrar tamaño de APKs
         run: |
