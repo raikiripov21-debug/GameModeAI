@@ -566,11 +566,14 @@ fun GameModeScreen(
                     Text("Sin tocar la sensibilidad del juego: reduce micro-saltos del sistema, vibración, gestos y cambios de Hz.",
                         fontSize = 11.sp, color = Color.White.copy(alpha = 0.35f))
                     HorizontalDivider(color = Color(0xFF1E1E1E))
+                    AimItem("AOT speed: compila Free Fire a ARM nativo · elimina picos JIT durante el aim")
                     AimItem("Touch raw sin filtros: debounce 0 ms · sin suavizado ni predicción")
                     AimItem("Long-press 300 ms (−100 ms) · doble tap más rápido")
                     AimItem("Asistente virtual OFF · sin robo de toques de Samsung")
                     AimItem("Swipe de cambio de app desactivado · sin salida accidental del juego")
                     AimItem("Samsung Security Engine OFF · sin picos de CPU durante el aim")
+                    AimItem("WiFi anti-power-save · sin saltos de ping de ~100 ms al bajar potencia WiFi")
+                    AimItem("vsync-CPU throttle OFF · Exynos 850 sin freno en el ciclo vsync")
                     AimItem("Animaciones 0× · respuesta visual inmediata al deslizar")
                     AimItem("60 Hz fijo · evita jitter por cambio dinámico de refresco")
                     AimItem("Gestos, panel lateral, vibración y sonidos táctiles OFF")
@@ -634,10 +637,13 @@ fun GameModeScreen(
 
                 // AIM
                 OptCard("◈ MIRA SIN SALTOS", PurpleAcc, Color(0xFF0E0018)) {
+                    AimItem("AOT speed: Free Fire compilado a ARM nativo — sin picos JIT durante el aim")
                     AimItem("Perfil automático de aim: sin sliders manuales ni cambios dentro del juego")
                     AimItem("Rebotes táctiles y debounce → mínimo posible")
                     AimItem("Puntero y respuesta táctil estabilizados por sistema")
                     AimItem("60 Hz fijo → sin jitter por cambio de Hz")
+                    AimItem("WiFi anti-power-save → sin saltos de ping de 100 ms")
+                    AimItem("vsync-CPU throttle OFF → Exynos 850 sin freno en vsync")
                     AimItem("Vision Booster OFF → GPU limpia")
                     AimItem("Vibración OFF → dedo más estable")
                     AimItem("Vulkan optimizado · layers debug OFF")
