@@ -7,7 +7,6 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
-import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -26,8 +25,7 @@ class GameService : Service() {
     companion object {
         const val CHANNEL_ID      = "game_mode_channel"
         const val NOTIFICATION_ID = 1001
-        const val PHASE2_MINUTES  = 20                  // Exynos 850 — menos eficiente que 1380
-        const val PHASE2_DELAY_MS = PHASE2_MINUTES * 60 * 1000L
+        const val PHASE2_DELAY_MS = 20 * 60 * 1000L   // 20 minutos
 
         fun start(context: Context) {
             val intent = Intent(context, GameService::class.java)
@@ -45,28 +43,25 @@ class GameService : Service() {
     private val serviceScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private lateinit var notificationManager: NotificationManager
     private var monitorJob: Job? = null
-    // WakeLock parcial: evita que el procesador entre en deep sleep durante mantenimiento
+    // WakeLock parcial: evita que el Exynos 850 del A06 entre en deep sleep
+    // mientras el servicio aplica el mantenimiento cada 5 minutos.
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
         notificationManager = getSystemService(NotificationManager::class.java)
         createNotificationChannel()
-        val notification = buildNotification(phase2 = false, minLeft = PHASE2_MINUTES)
-        // Android 14+ requiere declarar el tipo de foreground service al llamar startForeground
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
-        }
+        startForeground(NOTIFICATION_ID, buildNotification(phase2 = false, minLeft = 20))
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "GameModeAI:SessionLock")
-        wakeLock?.acquire(6 * 60 * 60 * 1000L)
+        wakeLock?.acquire(6 * 60 * 60 * 1000L)   // máximo 6 horas
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         monitorJob?.cancel()
 
+        // Solo registrar tiempo de inicio si no hay uno ya (evita resetear el contador
+        // cuando Android reinicia el servicio con START_STICKY después de matarlo).
         val alreadyRunning = Prefs.getLongGameStartMs(this) > 0L
         if (!alreadyRunning) {
             Prefs.startLongGame(this)
@@ -74,29 +69,35 @@ class GameService : Service() {
 
         monitorJob = serviceScope.launch {
 
+            // Calcular minutos restantes basándose en el tiempo de inicio real
+            // (importante para recuperarse correctamente tras un reinicio de servicio)
             val startMs     = Prefs.getLongGameStartMs(this@GameService)
             val elapsedMs   = System.currentTimeMillis() - startMs
             val remainingMs = (PHASE2_DELAY_MS - elapsedMs).coerceAtLeast(0L)
-            val elapsedMin  = (elapsedMs / 60_000L).coerceAtMost(PHASE2_MINUTES.toLong()).toInt()
+            val elapsedMin  = (elapsedMs / 60_000L).coerceAtMost(20L).toInt()
 
             if (Prefs.isPhase2Active(this@GameService)) {
-                // Fase 2 ya activa — ir directo al bucle de mantenimiento
+                // La Fase 2 ya estaba activa — saltar directamente al bucle de mantenimiento
             } else if (remainingMs > 0L) {
+                // Contar desde los minutos ya transcurridos hacia los 20
                 var elapsed = elapsedMin
-                while (isActive && elapsed < PHASE2_MINUTES) {
-                    delay(60_000L)
+                while (isActive && elapsed < 20) {
+                    delay(60_000L)   // 1 minuto
                     elapsed++
                     if (elapsed % 5 == 0) {
                         ShizukuHelper.applyMaintenanceMode()
                     }
-                    val minLeft = PHASE2_MINUTES - elapsed
+                    val minLeft = 20 - elapsed
                     notificationManager.notify(
                         NOTIFICATION_ID,
                         buildNotification(phase2 = false, minLeft = minLeft)
                     )
                 }
-                if (isActive) applyPhase2()
+                if (isActive) {
+                    applyPhase2()
+                }
             } else {
+                // Han pasado más de 20 minutos y Fase 2 aún no se aplicó
                 applyPhase2()
             }
 
@@ -129,6 +130,7 @@ class GameService : Service() {
         wakeLock = null
     }
 
+    // ── Fase 2 — reducción térmica para partidas largas ───────────────────────
     private suspend fun applyPhase2() {
         val ok = ShizukuHelper.applyLongGameMode()
         if (ok) {
@@ -140,6 +142,7 @@ class GameService : Service() {
         }
     }
 
+    // ── Notificación ──────────────────────────────────────────────────────────
     private fun buildNotification(phase2: Boolean, minLeft: Int): Notification {
         val pi = PendingIntent.getActivity(
             this, 0,
@@ -147,12 +150,17 @@ class GameService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        val title = if (phase2) "GameModeAI A06 — Fase 2 activa" else "GameModeAI A06 activo"
-        val text = when {
-            phase2         -> "Brillo y CPU reducidos · temp bajo control"
-            minLeft > 1    -> "Fase 2 térmica en $minLeft min · optimizado para Exynos 850"
-            else           -> "Fase 2 térmica en $minLeft min · casi lista!"
-        }
+        val title = if (phase2)
+            "GameModeAI — Fase 2 activa"
+        else
+            "GameModeAI activo"
+
+        val text = if (phase2)
+            "Brillo y CPU reducidos para mantener temp baja"
+        else if (minLeft > 1)
+            "Fase 2 térmica en $minLeft min · aim y rendimiento optimizados"
+        else
+            "Fase 2 térmica en $minLeft min · casi lista!"
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
@@ -165,6 +173,7 @@ class GameService : Service() {
             .build()
     }
 
+    // ── Canal de notificación ─────────────────────────────────────────────────
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
