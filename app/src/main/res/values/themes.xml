@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="Theme.GameModeAI" parent="Theme.AppCompat.Light.NoActionBar">
+    <!-- Tema de arranque para la activity — Compose toma el control al instante.
+         Usamos android:Theme.Material.NoActionBar (nativo Android) en lugar de
+         Theme.AppCompat para no necesitar la libreria appcompat. -->
+    <style name="Theme.GameModeAI" parent="android:Theme.Material.NoActionBar">
         <item name="android:windowBackground">@android:color/black</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
