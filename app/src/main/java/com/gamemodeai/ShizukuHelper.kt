@@ -412,6 +412,29 @@ object ShizukuHelper {
         ok
     }
 
+    /**
+     * Detecta si Free Fire (normal o MAX) está en los procesos activos.
+     * Usa dumpsys en un solo proceso sh para no saturar la CPU.
+     * Devuelve false si Shizuku no está disponible.
+     */
+    suspend fun isFreeFireRunning(): Boolean = withContext(Dispatchers.IO) {
+        if (!isShizukuAvailable() || !hasPermission()) return@withContext false
+        return@withContext try {
+            val p = Shizuku.newProcess(
+                arrayOf("sh", "-c",
+                    "dumpsys activity processes | grep -Ec 'freefireth|freefiremaxob'"),
+                null, null
+            )
+            val output = p.inputStream.bufferedReader().readText().trim()
+            p.waitFor()
+            p.destroy()
+            (output.toIntOrNull() ?: 0) > 0
+        } catch (e: Exception) {
+            Log.e(TAG, "isFreeFireRunning: " + e.message)
+            false
+        }
+    }
+
     /** Ejecuta un único comando shell via Shizuku. Para uso externo (ej. botón Limpiar RAM). */
     suspend fun run(cmd: String): Boolean = withContext(Dispatchers.IO) {
         runCommands(listOf(cmd))
