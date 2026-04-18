@@ -11,8 +11,9 @@ android {
         applicationId = "com.gamemodeai"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.1"
+        // En CI se inyecta: ./gradlew assembleRelease -PversionCode=<run_number>
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 38
+        versionName = (project.findProperty("versionCode") as String?)?.let { "v$it" } ?: "v38"
     }
 
     buildTypes {
@@ -37,6 +38,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true   // necesario para BuildConfig.VERSION_CODE en UpdateChecker
     }
 
     composeOptions {
