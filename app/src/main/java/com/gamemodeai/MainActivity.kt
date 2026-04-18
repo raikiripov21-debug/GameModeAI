@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
             GameModeAITheme {
                 GameModeScreen(
                     context = this,
+                    resumeTick = _resumeCount.intValue,
                     onToggle = { activate, onResult ->
                         lifecycleScope.launch {
                             val success = if (activate) ShizukuHelper.enableGameMode()
@@ -102,7 +103,12 @@ fun readCpuTempC(): Float {
         }
     return 0f
 }
-fun getBatteryLevel(context: Context): Int {
+fun readBatteryTempC(): Float = try {
+      val raw = File("/sys/class/power_supply/battery/temp").readText().trim().toFloat()
+      if (raw > 1000f) raw / 10f else raw   // Samsung reporta en décimas de grado
+  } catch (_: Exception) { 0f }
+
+  fun getBatteryLevel(context: Context): Int {
     val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
     val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
     val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
@@ -132,6 +138,7 @@ private val GreyText    = Color(0xFF757575)
 @Composable
 fun GameModeScreen(
     context: Context,
+    resumeTick: Int = 0,
     onToggle: (Boolean, (Boolean) -> Unit) -> Unit
 ) {
     var isActive     by remember { mutableStateOf(Prefs.isActive(context)) }
@@ -159,7 +166,10 @@ fun GameModeScreen(
     var sessionTime      by remember { mutableStateOf("") }   // "1:24:05" tiempo activo
     var thermalEmergency by remember { mutableStateOf(false) }
 
-    var actionMessage by remember { mutableStateOf("") }
+    var batteryTempC  by remember { mutableStateOf(0f) }
+      var freeFireRunning by remember { mutableStateOf<Boolean?>(null) }
+
+      var actionMessage by remember { mutableStateOf("") }
 
     // Actualizacion de la app
     var updateStatus by remember { mutableStateOf("idle") }
@@ -188,7 +198,7 @@ fun GameModeScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
+    LaunchedEffect(resumeTick) {
         shizuku = when {
             !ShizukuHelper.isShizukuAvailable() -> "No disponible"
             !ShizukuHelper.hasPermission()       -> "Sin permiso"
@@ -212,6 +222,7 @@ fun GameModeScreen(
     LaunchedEffect(isActive) {
         if (!isActive) {
             fps = 0; cpuMhz = 0; cpuTemp = 0f
+            batteryTempC = 0f; freeFireRunning = null
             isPhase2 = false; countdown = ""
             return@LaunchedEffect
         }
@@ -230,7 +241,13 @@ fun GameModeScreen(
                 ramFree    = getAvailableRamMb(context)
 
                 // Calcular cuenta regresiva hasta Fase 2 + temporizador de sesión
-                isPhase2 = Prefs.isPhase2Active(context)
+                // Cada ~15 seg: temperatura de batería + estado Free Fire
+                  if (fps > 0 && fps % 15 == 0) {
+                      batteryTempC    = readBatteryTempC()
+                      freeFireRunning = ShizukuHelper.isFreeFireRunning()
+                  }
+
+                  isPhase2 = Prefs.isPhase2Active(context)
                 val startMs = Prefs.getLongGameStartMs(context)
                 if (startMs > 0L) {
                     val elapsedMs = now - startMs
@@ -366,6 +383,28 @@ fun GameModeScreen(
                 }
             }
 
+            // ── FREE FIRE NO DETECTADO ─────────────────────────────────────────────
+            if (isActive && freeFireRunning == false) {
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0xFF1A1500))
+                        .padding(horizontal = 14.dp, vertical = 10.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text("⚠", fontSize = 16.sp)
+                        Column {
+                            Text("FREE FIRE NO DETECTADO",
+                                fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                                color = YellowAcc, letterSpacing = 0.5.sp)
+                            Text("El modo juego está activo pero Free Fire no se detecta en ejecución. Desactívalo si terminaste de jugar.",
+                                fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
+                        }
+                    }
+                }
+            }
+
             // ── CUENTA REGRESIVA hasta Fase 2 ────────────────────────────────
             if (isActive && !isPhase2 && countdown.isNotEmpty()) {
                 Box(
@@ -453,6 +492,32 @@ fun GameModeScreen(
                                 "Temperatura", tempLabel, tempColor)
                             MonitorMetric("$ramFree", "RAM MB",
                                 "${(ramPct*100).roundToInt()}% libre", ramColor)
+                        }
+                        // Segunda fila: temperatura batería + estado Free Fire
+                        Row(Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceEvenly) {
+                            val batTempColor = when {
+                                batteryTempC <= 0f -> GreyText
+                                batteryTempC < 36f -> GreenBright
+                                batteryTempC < 41f -> YellowAcc
+                                else               -> RedBright
+                            }
+                            val batTempLabel = when {
+                                batteryTempC <= 0f -> "—"
+                                batteryTempC < 36f -> "Normal"
+                                batteryTempC < 41f -> "Tibio"
+                                else               -> "Caliente"
+                            }
+                            MonitorMetric(
+                                if (batteryTempC > 0f) "${batteryTempC.roundToInt()}°" else "—",
+                                "Bat Temp", batTempLabel, batTempColor
+                            )
+                            MonitorMetric(
+                                when (freeFireRunning) { true -> "ON"; false -> "OFF"; else -> "—" },
+                                "Free Fire",
+                                when (freeFireRunning) { true -> "activo"; false -> "no detect."; else -> "—" },
+                                when (freeFireRunning) { true -> GreenBright; false -> YellowAcc; else -> GreyText }
+                            )
                         }
 
                         if (cpuMhz > 0 && maxFreq > 0) {
