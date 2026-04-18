@@ -170,6 +170,12 @@ object ShizukuHelper {
             "settings put global wifi_connected_mac_randomization_enabled 0",
             "settings put global network_recommendations_enabled 0",
             "settings put global wifi_enhanced_auto_join 0",
+            // WiFi anti power-save: previene saltos de ping de ~100 ms al entrar en ahorro WiFi
+            "settings put global wifi_suspend_optimizations_enabled 0",
+
+            // BLOQUE 11B · vsync-CPU: el Exynos 850 frena el CPU durante vsync por defecto,
+            // causando micro-stutters en el momento exacto en que el aim necesita respuesta rápida
+            "settings put global vsync_for_cpu_throttle 0",
 
             // BLOQUE 12 · LIMPIEZA FINAL
             "settings put global auto_time 0",
@@ -373,14 +379,37 @@ object ShizukuHelper {
             "settings put global nsd_on 1",
             "settings put global aggressive_wifi_to_mobile_handover 0",
             "settings put global mobile_data_always_on 0",
-            "settings put global wifi_connected_mac_randomization_enabled 1",    // faltaba restaurar
-            "settings put global network_recommendations_enabled 1",              // faltaba restaurar
-            "settings put global wifi_enhanced_auto_join 1",                     // faltaba restaurar
+            "settings put global wifi_connected_mac_randomization_enabled 1",
+            "settings put global network_recommendations_enabled 1",
+            "settings put global wifi_enhanced_auto_join 1",
+            "settings put global wifi_suspend_optimizations_enabled 1",
+            "settings put global vsync_for_cpu_throttle 1",
             "settings put global sync_disabled 0",
             "settings put global auto_time 1",
             "settings put secure location_mode 3",
             "settings put global fstrim_mandatory_interval 3600000"
         ))
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // AOT — Compilación Ahead-of-Time de Free Fire en modo "speed"
+    //
+    // Por defecto ART compila el código de Free Fire sobre la marcha (JIT) mientras
+    // juegas. Cada vez que entra código nuevo al CPU hay un pico de ~5-15 ms.
+    // Con AOT en modo "speed" TODO el código queda en ARM nativo ANTES de entrar al
+    // juego → sin picos JIT → frames más constantes → aim más estable.
+    //
+    // Primera ejecución: ~30-90 s (compila ~500 MB de DEX).
+    // Ejecuciones posteriores: <2 s (ya compilado, no hace nada).
+    // ══════════════════════════════════════════════════════════════════════════
+    suspend fun optimizeFreeFireAOT(): Boolean = withContext(Dispatchers.IO) {
+        Log.d(TAG, "AOT: iniciando compilación speed de Free Fire…")
+        val ok = runCommands(listOf(
+            "cmd package compile -m speed com.dts.freefireth",
+            "cmd package compile -m speed com.dts.freefiremaxob"
+        ))
+        Log.d(TAG, if (ok) "AOT: compilación completada" else "AOT: falló o Shizuku no disponible")
+        ok
     }
 
     /** Ejecuta un único comando shell via Shizuku. Para uso externo (ej. botón Limpiar RAM). */
