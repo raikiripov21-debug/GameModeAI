@@ -1,21 +1,14 @@
 package com.gamemodeai
 
-import android.Manifest
-import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.content.pm.PackageManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.core.content.ContextCompat
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -29,821 +22,336 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.lifecycleScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import java.io.File
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlin.math.roundToInt
+import java.io.File
+
+// ── Colores del panel gamer ───────────────────────────────────────────────────
+private val BgDark     = Color(0xFF080808)
+private val CardBg     = Color(0xFF0F0F0F)
+private val GreenBright = Color(0xFF00FF88)
+private val YellowAcc  = Color(0xFFFFCC00)
+private val RedBright  = Color(0xFFFF3B3B)
+private val OrangeAcc  = Color(0xFFFF8C00)
+private val GreyText   = Color(0xFF666666)
+private val TealAcc    = Color(0xFF00D4AA)
+private val CyanAcc    = Color(0xFF00CCFF)
+private val BlueAcc    = Color(0xFF4488FF)
+
+// ── Estado de sistema encapsulado (evita recomposiciones masivas) ─────────────
+private data class SystemStats(
+    val cpuMhz: Int      = 0,
+    val cpuTempC: Float  = 0f,
+    val ramFreeMb: Int   = 0,
+    val totalRamMb: Int  = 0,
+    val batteryPct: Int  = 0,
+    val batteryTempC: Float = 0f,
+    val isCharging: Boolean = false
+)
 
 class MainActivity : ComponentActivity() {
-    private val notificationPermissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        requestNotificationPermissionIfNeeded()
         setContent {
             GameModeAITheme {
-                GameModeScreen(
-                    context = this,
-                    onToggle = { activate, onResult ->
-                        lifecycleScope.launch {
-                            val success = if (activate) ShizukuHelper.enableGameMode()
-                                          else ShizukuHelper.disableGameMode()
-                            onResult(success)
-                        }
-                    }
-                )
+                GameModeScreen()
             }
         }
     }
-
-    private fun requestNotificationPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
-    }
 }
 
-// ── Lecturas del sistema ──────────────────────────────────────────────────────
-fun getAvailableRamMb(context: Context): Long {
-    val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-    val info = ActivityManager.MemoryInfo(); am.getMemoryInfo(info)
-    return info.availMem / (1024 * 1024)
-}
-fun getTotalRamMb(context: Context): Long {
-    val am = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-    val info = ActivityManager.MemoryInfo(); am.getMemoryInfo(info)
-    return info.totalMem / (1024 * 1024)
-}
-fun readCpuFreqMhz(): Int = try {
-    (File("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq").readText().trim().toLong() / 1000).toInt()
+// ── Lecturas del sistema (sin Shizuku, solo lectura de archivos del kernel) ───
+
+private fun readCpuFreqMhz(): Int = try {
+    // Intentar múltiples rutas del kernel para frecuencia CPU
+    val paths = listOf(
+        "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq",
+        "/sys/devices/system/cpu/cpu4/cpufreq/scaling_cur_freq",
+        "/sys/devices/system/cpu/cpufreq/all_time_in_state"
+    )
+    paths.firstNotNullOfOrNull { path ->
+        File(path).takeIf { it.canRead() }?.readText()?.trim()?.toLongOrNull()
+    }?.div(1000)?.toInt() ?: 0
 } catch (_: Exception) { 0 }
-fun readMaxCpuFreqMhz(): Int = try {
-    (File("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").readText().trim().toLong() / 1000).toInt()
+
+private fun readMaxCpuFreqMhz(): Int = try {
+    val paths = listOf(
+        "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq",
+        "/sys/devices/system/cpu/cpu4/cpufreq/cpuinfo_max_freq"
+    )
+    paths.firstNotNullOfOrNull { path ->
+        File(path).takeIf { it.canRead() }?.readText()?.trim()?.toLongOrNull()
+    }?.div(1000)?.toInt() ?: 1800
+} catch (_: Exception) { 1800 }
+
+private fun readCpuTempC(): Float = try {
+    val paths = listOf(
+        "/sys/class/thermal/thermal_zone0/temp",
+        "/sys/class/thermal/thermal_zone1/temp",
+        "/sys/class/thermal/thermal_zone2/temp",
+        "/sys/devices/virtual/thermal/thermal_zone0/temp"
+    )
+    paths.firstNotNullOfOrNull { path ->
+        File(path).takeIf { it.canRead() }?.readText()?.trim()?.toFloatOrNull()
+    }?.let { temp ->
+        if (temp > 1000f) temp / 1000f else temp // normalizar mili-Celsius
+    }?.takeIf { it in 15f..90f } ?: 0f
+} catch (_: Exception) { 0f }
+
+private fun getAvailableRamMb(context: Context): Int = try {
+    val mi = android.app.ActivityManager.MemoryInfo()
+    (context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager)
+        .getMemoryInfo(mi)
+    (mi.availMem / 1_048_576L).toInt()
 } catch (_: Exception) { 0 }
-fun readCpuTempC(): Float {
-    listOf("/sys/class/thermal/thermal_zone5/temp", "/sys/class/thermal/thermal_zone4/temp",
-        "/sys/class/thermal/thermal_zone3/temp", "/sys/class/thermal/thermal_zone1/temp",
-        "/sys/class/thermal/thermal_zone0/temp", "/sys/class/power_supply/battery/temp")
-        .forEach { path ->
-            try {
-                val raw = File(path).readText().trim().toFloat()
-                val t = if (raw > 1000f) raw / 1000f else raw
-                if (t in 15f..80f) return t
-            } catch (_: Exception) {}
-        }
-    return 0f
-}
-fun readBatteryTempC(): Float = try {
-      val raw = File("/sys/class/power_supply/battery/temp").readText().trim().toFloat()
-      if (raw > 1000f) raw / 10f else raw   // Samsung reporta en décimas de grado
-  } catch (_: Exception) { 0f }
 
-  fun getBatteryLevel(context: Context): Int {
-    val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-    val level = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, -1) ?: -1
-    val scale = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, -1) ?: -1
-    return if (level >= 0 && scale > 0) (level * 100 / scale) else -1
-}
-fun isCharging(context: Context): Boolean {
-    val intent = context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
-    val status = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
-    return status == BatteryManager.BATTERY_STATUS_CHARGING ||
-           status == BatteryManager.BATTERY_STATUS_FULL
-}
+private fun getTotalRamMb(context: Context): Int = try {
+    val mi = android.app.ActivityManager.MemoryInfo()
+    (context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager)
+        .getMemoryInfo(mi)
+    (mi.totalMem / 1_048_576L).toInt()
+} catch (_: Exception) { 3000 }
 
-// ── Paleta ────────────────────────────────────────────────────────────────────
-private val BgDark      = Color(0xFF0A0A0A)
-private val CardDark    = Color(0xFF141414)
-private val GreenBright = Color(0xFF00E676)
-private val GreenDark   = Color(0xFF00C853)
-private val RedBright   = Color(0xFFFF1744)
-private val BlueAcc     = Color(0xFF42A5F5)
-private val YellowAcc   = Color(0xFFFFD600)
-private val PurpleAcc   = Color(0xFFCE93D8)
-private val OrangeAcc   = Color(0xFFFF9800)
-private val CyanAcc     = Color(0xFF00E5FF)
-private val TealAcc     = Color(0xFF1DE9B6)
-private val GreyText    = Color(0xFF757575)
+private fun getBatteryInfo(context: Context): Triple<Int, Float, Boolean> = try {
+    val intent = context.registerReceiver(null,
+        IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+    val level   = intent?.getIntExtra(BatteryManager.EXTRA_LEVEL, 0) ?: 0
+    val scale   = intent?.getIntExtra(BatteryManager.EXTRA_SCALE, 100) ?: 100
+    val pct     = if (scale > 0) (level * 100 / scale) else 0
+    val tempRaw = intent?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0) ?: 0
+    val tempC   = tempRaw / 10f
+    val status  = intent?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+    val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                   status == BatteryManager.BATTERY_STATUS_FULL
+    Triple(pct, tempC, charging)
+} catch (_: Exception) { Triple(0, 0f, false) }
+
+// ── Pantalla principal ────────────────────────────────────────────────────────
 
 @Composable
-fun GameModeScreen(
-    context: Context,
-    onToggle: (Boolean, (Boolean) -> Unit) -> Unit
-) {
-    var isActive     by remember { mutableStateOf(Prefs.isActive(context)) }
-    var isLoading    by remember { mutableStateOf(false) }
-    var ramFree      by remember { mutableStateOf(getAvailableRamMb(context)) }
-    var ramBefore    by remember { mutableStateOf(0L) }
-    val totalRam     = remember { getTotalRamMb(context) }
-    val maxFreq      = remember { readMaxCpuFreqMhz() }
-    var shizuku      by remember { mutableStateOf("Verificando...") }
+fun GameModeScreen() {
+    val context = LocalContext.current
 
-    // Monitor en tiempo real
-    var fps          by remember { mutableIntStateOf(0) }
-    var cpuMhz       by remember { mutableIntStateOf(0) }
-    var cpuTemp      by remember { mutableStateOf(0f) }
-    var fpsCounter   by remember { mutableIntStateOf(0) }
-    var lastFpsMs    by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    // Estado de activación
+    var isActive   by remember { mutableStateOf(Prefs.isActive(context)) }
+    var isLoading  by remember { mutableStateOf(false) }
+    var isPhase2   by remember { mutableStateOf(Prefs.isPhase2Active(context)) }
+    var countdown  by remember { mutableStateOf("") }
+    var sessionTime by remember { mutableStateOf("") }
 
-    // Batería
-    var batteryPct   by remember { mutableIntStateOf(getBatteryLevel(context)) }
-    var charging     by remember { mutableStateOf(isCharging(context)) }
+    // Shizuku
+    var shizukuStatus by remember {
+        mutableStateOf(when {
+            !ShizukuHelper.isShizukuAvailable() -> ShizukuStatus.UNAVAILABLE
+            !ShizukuHelper.hasPermission()       -> ShizukuStatus.NO_PERMISSION
+            else                                  -> ShizukuStatus.READY
+        })
+    }
 
-    // Fase 2 — partida larga
-    var isPhase2         by remember { mutableStateOf(false) }
-    var countdown        by remember { mutableStateOf("") }   // "18:42" restantes
-    var sessionTime      by remember { mutableStateOf("") }   // "1:24:05" tiempo activo
-    var thermalEmergency by remember { mutableStateOf(false) }
+    // Métricas del sistema
+    var stats     by remember { mutableStateOf(SystemStats()) }
+    val maxFreq   = remember { readMaxCpuFreqMhz() }
+    val totalRam  = remember { getTotalRamMb(context) }
 
-    var batteryTempC  by remember { mutableStateOf(0f) }
-      var freeFireRunning by remember { mutableStateOf<Boolean?>(null) }
-
-      var actionMessage by remember { mutableStateOf("") }
-
-    // Actualizacion de la app
+    // UpdateChecker
     var updateStatus by remember { mutableStateOf("idle") }
     var updateInfo   by remember { mutableStateOf<UpdateInfo?>(null) }
-    var dlProgress   by remember { mutableIntStateOf(0) }
+    var dlProgress   by remember { mutableStateOf(0) }
     val updateScope  = rememberCoroutineScope()
 
-    // Emergencia térmica automática: si temp ≥ 48°C, aplicar enfriamiento de emergencia
-    val thermalScope = rememberCoroutineScope()
-    LaunchedEffect(cpuTemp, isActive) {
-        if (!isActive) { thermalEmergency = false; return@LaunchedEffect }
-        if (cpuTemp >= 48f && !thermalEmergency) {
-            thermalEmergency = true
-            thermalScope.launch {
-                ShizukuHelper.run(
-                    "settings put system screen_brightness 50 ; " +
-                    "settings put global background_process_limit 0 ; " +
-                    "am kill-all ; " +
-                    "am force-stop com.samsung.android.game.gos ; " +
-                    "am force-stop com.samsung.android.game.gamehome ; " +
-                    "am force-stop com.samsung.android.bixby.agent"
-                )
-            }
-        } else if (cpuTemp in 1f..45f) {
-            thermalEmergency = false
-        }
-    }
-
-    // Shizuku/batería se re-verifican cada 5 s (detecta activación sin reiniciar app)
+    // ── Monitor de Shizuku cada 5 segundos ───────────────────────────────────
     LaunchedEffect(Unit) {
         while (true) {
-            shizuku = when {
-                !ShizukuHelper.isShizukuAvailable() -> "No disponible"
-                !ShizukuHelper.hasPermission()       -> "Sin permiso"
-                else                                  -> "Listo"
-            }
-            ramFree    = getAvailableRamMb(context)
-            batteryPct = getBatteryLevel(context)
-            charging   = isCharging(context)
             delay(5_000L)
+            shizukuStatus = when {
+                !ShizukuHelper.isShizukuAvailable() -> ShizukuStatus.UNAVAILABLE
+                !ShizukuHelper.hasPermission()       -> ShizukuStatus.NO_PERMISSION
+                else                                  -> ShizukuStatus.READY
+            }
         }
     }
 
-    // Lectura de batería cada 30 segundos en segundo plano
+    // ── Monitor de métricas del sistema cada 3 segundos ───────────────────────
+    // Intervalo de 3s (no 1s) para reducir carga en CPU del A06
     LaunchedEffect(Unit) {
         while (true) {
-            delay(30_000L)
-            batteryPct = getBatteryLevel(context)
-            charging   = isCharging(context)
+            val (pct, battTemp, charging) = getBatteryInfo(context)
+            stats = SystemStats(
+                cpuMhz       = readCpuFreqMhz(),
+                cpuTempC     = readCpuTempC(),
+                ramFreeMb    = getAvailableRamMb(context),
+                totalRamMb   = totalRam,
+                batteryPct   = pct,
+                batteryTempC = battTemp,
+                isCharging   = charging
+            )
+            delay(3_000L)
         }
     }
 
-    // Monitor continuo: FPS + CPU + temperatura + fase2 cada segundo
+    // ── Temporizador de sesión y cuenta regresiva a Fase 2 ───────────────────
     LaunchedEffect(isActive) {
         if (!isActive) {
-            fps = 0; cpuMhz = 0; cpuTemp = 0f
-            batteryTempC = 0f; freeFireRunning = null
-            isPhase2 = false; countdown = ""
+            countdown   = ""
+            sessionTime = ""
             return@LaunchedEffect
         }
-        fpsCounter = 0
-        lastFpsMs  = System.currentTimeMillis()
         while (isActive) {
-            withFrameMillis { }
-            fpsCounter++
-            val now = System.currentTimeMillis()
-            if (now - lastFpsMs >= 1000L) {
-                fps        = fpsCounter
-                fpsCounter = 0
-                lastFpsMs  = now
-                cpuMhz     = readCpuFreqMhz()
-                cpuTemp    = readCpuTempC()
-                ramFree    = getAvailableRamMb(context)
+            delay(1_000L)
+            isPhase2 = Prefs.isPhase2Active(context)
+            val startMs = Prefs.getLongGameStartMs(context)
+            if (startMs > 0L) {
+                val elapsed = System.currentTimeMillis() - startMs
+                val h  = (elapsed / 3_600_000L).toInt()
+                val m  = ((elapsed % 3_600_000L) / 60_000L).toInt()
+                val s  = ((elapsed % 60_000L) / 1_000L).toInt()
+                sessionTime = if (h > 0) "%d:%02d:%02d".format(h, m, s)
+                              else "%d:%02d".format(m, s)
 
-                // Calcular cuenta regresiva hasta Fase 2 + temporizador de sesión
-                // Cada ~15 seg: temperatura de batería + estado Free Fire
-                  if (fps > 0 && fps % 15 == 0) {
-                      batteryTempC    = readBatteryTempC()
-                      freeFireRunning = ShizukuHelper.isFreeFireRunning()
-                  }
-
-                  isPhase2 = Prefs.isPhase2Active(context)
-                val startMs = Prefs.getLongGameStartMs(context)
-                if (startMs > 0L) {
-                    val elapsedMs = now - startMs
-                    // Temporizador de sesión (tiempo total activo)
-                    val h = (elapsedMs / 3_600_000L).toInt()
-                    val mT = ((elapsedMs % 3_600_000L) / 60_000L).toInt()
-                    val sT = ((elapsedMs % 60_000L) / 1000L).toInt()
-                    sessionTime = if (h > 0) "%d:%02d:%02d".format(h, mT, sT)
-                                  else "%d:%02d".format(mT, sT)
-                    // Cuenta regresiva a Fase 2
-                    if (!isPhase2) {
-                        val remainingMs = (20 * 60 * 1000L) - elapsedMs
-                        if (remainingMs > 0) {
-                            val m = (remainingMs / 60_000L).toInt()
-                            val s = ((remainingMs % 60_000L) / 1000L).toInt()
-                            countdown = "%d:%02d".format(m, s)
-                        } else {
-                            countdown = "0:00"
-                        }
-                    }
+                if (!isPhase2) {
+                    val remaining = (20 * 60_000L) - elapsed
+                    countdown = if (remaining > 0) {
+                        val cm = (remaining / 60_000L).toInt()
+                        val cs = ((remaining % 60_000L) / 1_000L).toInt()
+                        "%d:%02d".format(cm, cs)
+                    } else "0:00"
                 }
             }
         }
     }
 
-    val ramPct    = if (totalRam > 0) ramFree.toFloat() / totalRam.toFloat() else 0f
+    // ── Derivados de estado ───────────────────────────────────────────────────
+    val ramPct    = if (stats.totalRamMb > 0) stats.ramFreeMb.toFloat() / stats.totalRamMb else 0f
+    val freqPct   = if (maxFreq > 0) stats.cpuMhz.toFloat() / maxFreq else 0f
     val ramColor  = when { ramPct > 0.4f -> GreenBright; ramPct > 0.2f -> YellowAcc; else -> RedBright }
-    val tempColor = when { cpuTemp <= 0f -> GreyText; cpuTemp < 38f -> GreenBright; cpuTemp < 44f -> YellowAcc; else -> RedBright }
-    val tempLabel = when { cpuTemp <= 0f -> "—"; cpuTemp < 38f -> "Frío"; cpuTemp < 44f -> "Tibio"; else -> "Caliente" }
-    val freqPct   = if (maxFreq > 0) cpuMhz.toFloat() / maxFreq.toFloat() else 0f
-    val freqColor = when { freqPct > 0.75f -> GreenBright; freqPct > 0.45f -> YellowAcc; else -> RedBright }
-    val fpsColor  = when { fps >= 58 -> GreenBright; fps >= 45 -> YellowAcc; fps > 0 -> RedBright; else -> GreyText }
+    val tempColor = when { stats.cpuTempC <= 0f -> GreyText; stats.cpuTempC < 38f -> GreenBright; stats.cpuTempC < 44f -> YellowAcc; else -> RedBright }
+    val tempLabel = when { stats.cpuTempC <= 0f -> "—"; stats.cpuTempC < 38f -> "Frío"; stats.cpuTempC < 44f -> "Tibio"; else -> "Caliente" }
+    val freqColor = when { freqPct > 0.75f -> GreenBright; freqPct > 0.45f -> YellowAcc; else -> GreyText }
 
-    Scaffold(containerColor = BgDark, modifier = Modifier.fillMaxSize()) { pad ->
+    Scaffold(
+        containerColor = BgDark,
+        modifier = Modifier.fillMaxSize()
+    ) { paddingValues ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(pad)
-                .padding(horizontal = 16.dp, vertical = 10.dp)
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(paddingValues)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
 
-            // ── Header ────────────────────────────────────────────────────────
-            Row(verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("GameModeAI", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                Text(BuildConfig.VERSION_NAME, fontSize = 11.sp, color = GreyText,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(Color(0xFF1E1E1E))
-                        .padding(horizontal = 6.dp, vertical = 2.dp))
-            }
-            Text("Galaxy A06  ·  Free Fire  ·  ajustes del sistema", fontSize = 11.sp, color = GreyText)
+            // ── Header ───────────────────────────────────────────────────────
+            HeaderSection()
 
-            // ── AVISO CARGANDO — el A06 se calienta mucho al jugar cargando ──
-            if (charging) {
-                Box(
-                    modifier = Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF1A0800))
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("⚠", fontSize = 18.sp)
-                        Column {
-                            Text("CARGANDO mientras juegas",
-                                fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                                color = OrangeAcc, letterSpacing = 0.5.sp)
-                            Text("El A06 puede sobrecalentarse. Desconecta el cargador para partidas largas.",
-                                fontSize = 11.sp, color = Color.White.copy(alpha = 0.65f))
-                        }
-                    }
-                }
-            }
-
-            // ── SHIZUKU NO DISPONIBLE — instrucciones paso a paso ────────────
-            if (shizuku == "No disponible" || shizuku == "Verificando...") {
-                Card(modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF1A0000)),
-                    shape = RoundedCornerShape(14.dp)) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text("SHIZUKU NO ESTÁ ACTIVO", fontSize = 10.sp,
-                            color = RedBright, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                        Text("Esta app necesita Shizuku para funcionar. Sigue estos pasos:",
-                            fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
-                        SetupStep("1", "Instala Shizuku desde Play Store")
-                        SetupStep("2", "Abre Shizuku y toca 'Iniciar mediante ADB inalámbrico' (Android 11+) o 'Iniciar mediante root'")
-                        SetupStep("3", "Sigue las instrucciones en pantalla de Shizuku")
-                        SetupStep("4", "Ya listo? Toca el botón de abajo para verificar")
-                        Button(
-                            onClick = {
-                                shizuku = when {
-                                    !ShizukuHelper.isShizukuAvailable() -> "No disponible"
-                                    !ShizukuHelper.hasPermission()       -> "Sin permiso"
-                                    else                                  -> "Listo"
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3D0000))
-                        ) {
-                            Text("Verificar estado de Shizuku",
-                                fontSize = 13.sp, color = RedBright, fontWeight = FontWeight.Bold)
-                        }
-                    }
-                }
-            }
-
-            // ── FASE 2 BANNER (cuando está activa) ────────────────────────────
-            if (isActive && isPhase2) {
-                Box(
-                    modifier = Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Brush.horizontalGradient(
-                            listOf(Color(0xFF0D2B25), Color(0xFF0A3320))))
-                        .padding(14.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("🌡", fontSize = 22.sp)
-                        Column {
-                            Text("FASE 2 ACTIVA — PARTIDA LARGA",
-                                fontSize = 10.sp, color = TealAcc,
-                                fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                            Text("Brillo al 29 % · 0 procesos en fondo · temp controlada",
-                                fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
-                        }
-                    }
-                }
-            }
-
-            // ── FREE FIRE NO DETECTADO ─────────────────────────────────────────────
-            if (isActive && freeFireRunning == false) {
-                Box(
-                    modifier = Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF1A1500))
-                        .padding(horizontal = 14.dp, vertical = 10.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("⚠", fontSize = 16.sp)
-                        Column {
-                            Text("FREE FIRE NO DETECTADO",
-                                fontSize = 11.sp, fontWeight = FontWeight.Bold,
-                                color = YellowAcc, letterSpacing = 0.5.sp)
-                            Text("El modo juego está activo pero Free Fire no se detecta en ejecución. Desactívalo si terminaste de jugar.",
-                                fontSize = 11.sp, color = Color.White.copy(alpha = 0.6f))
-                        }
-                    }
-                }
-            }
-
-            // ── CUENTA REGRESIVA hasta Fase 2 ────────────────────────────────
-            if (isActive && !isPhase2 && countdown.isNotEmpty()) {
-                Box(
-                    modifier = Modifier.fillMaxWidth()
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF141400))
-                        .padding(horizontal = 16.dp, vertical = 10.dp)
-                ) {
-                    Row(Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Column {
-                            Text("FASE 2 TÉRMICA", fontSize = 10.sp,
-                                color = YellowAcc.copy(alpha = 0.7f),
-                                fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                            Text("Brillo extra bajo + limpieza total al llegar a 0",
-                                fontSize = 11.sp, color = Color.White.copy(alpha = 0.55f))
-                        }
-                        Text(countdown, fontSize = 26.sp,
-                            fontWeight = FontWeight.Bold, color = YellowAcc)
-                    }
-                }
-            }
-
-            // ── Estado ────────────────────────────────────────────────────────
-            Box(
-                modifier = Modifier.fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(
-                        if (isActive)
-                            Brush.horizontalGradient(listOf(Color(0xFF0D3B1E), Color(0xFF1B5E20)))
-                        else
-                            Brush.horizontalGradient(listOf(Color(0xFF141414), Color(0xFF1E1E1E)))
-                    )
-                    .padding(22.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("MODO JUEGO", fontSize = 10.sp, color = Color.White.copy(alpha = 0.45f),
-                        fontWeight = FontWeight.Bold, letterSpacing = 2.sp)
-                    if (isLoading) {
-                        CircularProgressIndicator(color = GreenBright,
-                            modifier = Modifier.size(30.dp), strokeWidth = 3.dp)
-                        Text("Aplicando 40+ optimizaciones...", fontSize = 13.sp,
-                            color = Color.White.copy(alpha = 0.7f))
-                    } else {
-                        Text(if (isActive) "● ACTIVO" else "○ INACTIVO",
-                            fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                            color = if (isActive) GreenBright else GreyText)
-                        if (isActive)
-                            Text(
-                                if (isPhase2)
-                                    "Fase 2 activa · temp controlada · mira pro"
-                                else
-                                    "GOS·NFC·GPS off · Mira sin saltos · Fase 2 en $countdown",
-                                fontSize = 11.sp, color = GreenBright.copy(alpha = 0.6f))
-                    }
-                }
-            }
-
-            // ── MONITOR EN TIEMPO REAL ────────────────────────────────────────
-            if (isActive) {
-                Card(modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0A1400)),
-                    shape = RoundedCornerShape(18.dp)) {
-                    Column(Modifier.fillMaxWidth().padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text("MONITOR EN VIVO", fontSize = 10.sp,
-                                color = GreenBright.copy(alpha = 0.7f),
-                                fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                            Box(modifier = Modifier.size(8.dp).clip(CircleShape)
-                                .background(if (isPhase2) TealAcc else GreenBright))
-                        }
-
-                        Row(Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly) {
-                            MonitorMetric(if (fps > 0) "$fps" else "—", "FPS pantalla",
-                                if (fps >= 58) "Fluido" else if (fps > 0) "Bajo" else "—", fpsColor)
-                            MonitorMetric(if (cpuMhz > 0) "$cpuMhz" else "—", "CPU MHz",
-                                if (cpuMhz > 0 && maxFreq > 0) "${(freqPct*100).roundToInt()}%" else "—", freqColor)
-                            MonitorMetric(if (cpuTemp > 0f) "${cpuTemp.roundToInt()}°" else "—",
-                                "Temperatura", tempLabel, tempColor)
-                            MonitorMetric("$ramFree", "RAM MB",
-                                "${(ramPct*100).roundToInt()}% libre", ramColor)
-                        }
-                        // Segunda fila: temperatura batería + estado Free Fire
-                        Row(Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceEvenly) {
-                            val batTempColor = when {
-                                batteryTempC <= 0f -> GreyText
-                                batteryTempC < 36f -> GreenBright
-                                batteryTempC < 41f -> YellowAcc
-                                else               -> RedBright
-                            }
-                            val batTempLabel = when {
-                                batteryTempC <= 0f -> "—"
-                                batteryTempC < 36f -> "Normal"
-                                batteryTempC < 41f -> "Tibio"
-                                else               -> "Caliente"
-                            }
-                            MonitorMetric(
-                                if (batteryTempC > 0f) "${batteryTempC.roundToInt()}°" else "—",
-                                "Bat Temp", batTempLabel, batTempColor
-                            )
-                            MonitorMetric(
-                                when (freeFireRunning) { true -> "ON"; false -> "OFF"; else -> "—" },
-                                "Free Fire",
-                                when (freeFireRunning) { true -> "activo"; false -> "no detect."; else -> "—" },
-                                when (freeFireRunning) { true -> GreenBright; false -> YellowAcc; else -> GreyText }
-                            )
-                        }
-
-                        if (cpuMhz > 0 && maxFreq > 0) {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("CPU $cpuMhz MHz", fontSize = 11.sp, color = GreyText)
-                                    Text("máx $maxFreq MHz", fontSize = 11.sp, color = GreyText)
-                                }
-                                LinearProgressIndicator(
-                                    progress = { freqPct.coerceIn(0f, 1f) },
-                                    modifier = Modifier.fillMaxWidth().height(5.dp)
-                                        .clip(RoundedCornerShape(3.dp)),
-                                    color = freqColor, trackColor = Color(0xFF1A1A1A))
-                            }
-                        }
-
-                        if (cpuTemp >= 44f) {
-                            Row(Modifier.fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(RedBright.copy(alpha = 0.12f))
-                                .padding(10.dp),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Text("⚠", fontSize = 16.sp)
-                                Text("Temperatura alta — pausa 2-3 min o reduce el brillo de FF",
-                                    fontSize = 11.sp, color = RedBright.copy(alpha = 0.85f))
-                            }
-                        }
-                        if (sessionTime.isNotEmpty()) {
-                            HorizontalDivider(color = Color(0xFF1E1E1E))
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically) {
-                                Text("Sesión activa", fontSize = 12.sp, color = GreyText)
-                                Text(sessionTime, fontSize = 16.sp, fontWeight = FontWeight.Bold,
-                                    color = if (isPhase2) TealAcc else GreenBright)
-                            }
-                        }
-                        Text("FPS = fluidez de la interfaz · CPU alta = sin throttling = mira estable",
-                            fontSize = 10.sp, color = GreyText.copy(alpha = 0.4f))
-                    }
-                }
-            }
-
-            // ── RAM + estado sistema ──────────────────────────────────────────
-            Card(modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = CardDark),
-                shape = RoundedCornerShape(16.dp)) {
-                Column(Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("RAM Libre", fontSize = 13.sp, color = GreyText)
-                        Text("$ramFree MB / $totalRam MB", fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold, color = ramColor)
-                    }
-                    LinearProgressIndicator(progress = { ramPct.coerceIn(0f, 1f) },
-                        modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(3.dp)),
-                        color = ramColor, trackColor = Color(0xFF222222))
-                    if (isActive && ramBefore > 0) {
-                        val freed = ramFree - ramBefore
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("RAM ganada", fontSize = 12.sp, color = GreyText)
-                            Text("${if (freed >= 0) "+" else ""}$freed MB", fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (freed >= 0) GreenBright else RedBright)
-                        }
-                    }
-                    HorizontalDivider(color = Color(0xFF1E1E1E))
-                    Row(Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text("Shizuku", fontSize = 12.sp, color = GreyText)
-                        if (shizuku == "Sin permiso") {
-                            TextButton(
-                                onClick = { ShizukuHelper.requestPermission() },
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-                            ) {
-                                Text("Sin permiso — Toca para conceder",
-                                    fontSize = 11.sp, color = YellowAcc,
-                                    fontWeight = FontWeight.Bold)
-                            }
-                        } else {
-                            Text(shizuku, fontSize = 12.sp, fontWeight = FontWeight.Medium,
-                                color = if (shizuku == "Listo") GreenBright else RedBright)
-                        }
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Batería", fontSize = 12.sp, color = GreyText)
-                        val batColor = when { batteryPct > 50 -> GreenBright; batteryPct > 20 -> YellowAcc; else -> RedBright }
-                        Text(
-                            if (batteryPct >= 0) "${batteryPct}%${if (charging) " ⚡" else ""}" else "—",
-                            fontSize = 12.sp, fontWeight = FontWeight.Medium, color = batColor)
-                    }
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Android", fontSize = 12.sp, color = GreyText)
-                        Text("${Build.VERSION.RELEASE} · API ${Build.VERSION.SDK_INT}",
-                            fontSize = 12.sp, color = Color.White.copy(alpha = 0.7f))
-                    }
-                    if (actionMessage.isNotEmpty()) {
-                        HorizontalDivider(color = Color(0xFF1E1E1E))
-                        Text(actionMessage, fontSize = 11.sp,
-                            color = if (shizuku == "Listo") GreenBright.copy(alpha = 0.75f) else YellowAcc.copy(alpha = 0.85f))
-                    }
-                }
-            }
-
-            // ── AIM AUTOMÁTICO ─────────────────────────────────────────────────
-            Card(modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF0E0018)),
-                shape = RoundedCornerShape(16.dp)) {
-                Column(Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text("AIM ESTABLE AUTOMÁTICO", fontSize = 10.sp,
-                            color = PurpleAcc, fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
-                        Text(if (isActive) "aplicado" else "listo", fontSize = 10.sp,
-                            color = if (isActive) GreenBright else GreyText)
-                    }
-                    Text("Sin tocar la sensibilidad del juego: reduce micro-saltos del sistema, vibración, gestos y cambios de Hz.",
-                        fontSize = 11.sp, color = Color.White.copy(alpha = 0.35f))
-                    HorizontalDivider(color = Color(0xFF1E1E1E))
-                    AimItem("AOT speed: compila Free Fire a ARM nativo · elimina picos JIT durante el aim")
-                    AimItem("Touch raw sin filtros: debounce 0 ms · sin suavizado ni predicción")
-                    AimItem("Long-press 300 ms (−100 ms) · doble tap más rápido")
-                    AimItem("Asistente virtual OFF · sin robo de toques de Samsung")
-                    AimItem("Swipe de cambio de app desactivado · sin salida accidental del juego")
-                    AimItem("Samsung Security Engine OFF · sin picos de CPU durante el aim")
-                    AimItem("WiFi anti-power-save · sin saltos de ping de ~100 ms al bajar potencia WiFi")
-                    AimItem("vsync-CPU throttle OFF · Exynos 850 sin freno en el ciclo vsync")
-                    AimItem("Animaciones 0× · respuesta visual inmediata al deslizar")
-                    AimItem("60 Hz fijo · evita jitter por cambio dinámico de refresco")
-                    AimItem("Gestos, panel lateral, vibración y sonidos táctiles OFF")
-                }
-            }
-
-            // ── EMERGENCIA TÉRMICA (> 48 °C) ─────────────────────────────────
-            if (thermalEmergency) {
-                Card(modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF280000)),
-                    shape = RoundedCornerShape(14.dp)) {
-                    Row(Modifier.fillMaxWidth().padding(14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically) {
-                        Text("🔥", fontSize = 22.sp)
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text("EMERGENCIA TÉRMICA", fontSize = 11.sp,
-                                color = RedBright, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-                            Text("Brillo → mínimo · apps → 0 · GOS parado de emergencia",
-                                fontSize = 11.sp, color = Color.White.copy(alpha = 0.7f))
-                            Text("Pausa el juego 1-2 min para bajar temperatura",
-                                fontSize = 10.sp, color = RedBright.copy(alpha = 0.6f))
-                        }
-                    }
-                }
-            }
-
-            // ── Optimizaciones ────────────────────────────────────────────────
-            if (isActive) {
-
-                // Fase 2 detalle
-                if (isPhase2) {
-                    OptCard("🌡 FASE 2 — PARTIDA LARGA ACTIVA", TealAcc, Color(0xFF0A1F1A)) {
-                        Phase2Item("Brillo bajado al 29 % (75/255) — máximo anti-calor")
-                        Phase2Item("0 procesos en fondo — solo existe Free Fire")
-                        Phase2Item("GOS + Bixby + Samsung sm → parados de nuevo")
-                        Phase2Item("Tercera limpieza de RAM completa")
-                        Phase2Item("WiFi·GPS·Sync·NFC confirmados OFF")
-                        Phase2Item("Prioridad de proceso de FF confirmada al máximo")
-                        Phase2Item("Temperatura controlada · mira estable en partidas de 30+ min")
-                    }
-                }
-
-                // Anti-calor
-                OptCard("❄ ANTI-CALENTAMIENTO", OrangeAcc, Color(0xFF180900)) {
-                    TempItem("NFC OFF — chip NFC genera calor aunque no lo uses")
-                    TempItem("Pantalla al 45 % (Fase 1) / 29 % (Fase 2)")
-                    TempItem("GPS OFF · WiFi sin escaneos · BT escaneo OFF")
-                    TempItem("AOD OFF · Acelerómetro OFF · Sync OFF")
-                    TempItem("10 servicios Samsung calientes parados")
-                    TempItem("RAM limpiada · menos apps = menos calor de CPU")
-                }
-
-                // GOS
-                OptCard("◉ GAME OPTIMIZING SERVICE — PARADO", CyanAcc, Color(0xFF001820)) {
-                    GOSItem("GOS parado → CPU/GPU al 100 % sin throttling de software")
-                    GOSItem("Game Launcher + Game Tools parados")
-                    GOSItem("Batería adaptativa OFF · ahorro automático OFF")
-                    GOSItem("(Protección HARDWARE del kernel siempre activa)")
-                }
-
-                // AIM
-                OptCard("◈ MIRA SIN SALTOS", PurpleAcc, Color(0xFF0E0018)) {
-                    AimItem("AOT speed: Free Fire compilado a ARM nativo — sin picos JIT durante el aim")
-                    AimItem("Perfil automático de aim: sin sliders manuales ni cambios dentro del juego")
-                    AimItem("Rebotes táctiles y debounce → mínimo posible")
-                    AimItem("Puntero y respuesta táctil estabilizados por sistema")
-                    AimItem("60 Hz fijo → sin jitter por cambio de Hz")
-                    AimItem("WiFi anti-power-save → sin saltos de ping de 100 ms")
-                    AimItem("vsync-CPU throttle OFF → Exynos 850 sin freno en vsync")
-                    AimItem("Vision Booster OFF → GPU limpia")
-                    AimItem("Vibración OFF → dedo más estable")
-                    AimItem("Vulkan optimizado · layers debug OFF")
-                }
-
-                // A06
-                OptCard("⚡ FALLOS SAMSUNG A06 — CORREGIDOS", YellowAcc, Color(0xFF140D00)) {
-                    A06Item("Panel lateral OFF · Gestos → 3 botones")
-                    A06Item("Modo inmersivo forzado en Free Fire")
-                    A06Item("Botón lateral / asistente de voz → OFF")
-                    A06Item("Prevención toque accidental → OFF")
-                    A06Item("WiFi watchdog OFF · Doze aplazado")
-                }
-
-                // General
-                OptCard("✓ RENDIMIENTO GENERAL", BlueAcc, Color(0xFF000D1A)) {
-                    OptItem("Animaciones → 0 · Apps de fondo congeladas")
-                    OptItem("Notificaciones emergentes OFF")
-                    OptItem("WiFi estable sin escaneos")
-                    OptItem("RAM limpiada 2× (Fase 1) + 1× (Fase 2)")
-                }
-            }
-
-            // ── Botón ─────────────────────────────────────────────────────────
-            Button(
-                onClick = {
-                    if (isLoading) return@Button
-                    val activate = !isActive
-                    if (activate) ramBefore = getAvailableRamMb(context)
-                    isLoading = true
-                    onToggle(activate) { success ->
-                        isLoading = false
-                        if (success) {
-                            isActive = activate
-                            Prefs.setActive(context, activate)
-                            actionMessage = if (activate)
-                                "Modo juego activo. El mantenimiento se reaplica cada 5 minutos durante partidas largas."
-                            else
-                                "Modo juego desactivado. Ajustes principales restaurados."
-                            if (activate) { GameService.start(context); ramFree = getAvailableRamMb(context) }
-                            else { GameService.stop(context); ramBefore = 0L; ramFree = getAvailableRamMb(context); isPhase2 = false; countdown = "" }
-                            shizuku = "Listo"
-                        } else {
-                            shizuku = when {
-                                !ShizukuHelper.isShizukuAvailable() -> "No disponible"
-                                !ShizukuHelper.hasPermission() -> "Sin permiso"
-                                else -> "Error"
-                            }
-                            actionMessage = when (shizuku) {
-                                "No disponible" -> "Abre Shizuku, inicia el servicio y vuelve a intentarlo."
-                                "Sin permiso" -> "Acepta el permiso de Shizuku y toca activar otra vez."
-                                else -> "No se pudieron aplicar todos los ajustes. Revisa Shizuku y prueba de nuevo."
-                            }
-                        }
-                    }
-                },
-                enabled = !isLoading,
-                modifier = Modifier.fillMaxWidth().height(58.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = when {
-                        isLoading -> Color(0xFF1E1E1E)
-                        isPhase2  -> TealAcc.copy(alpha = 0.85f)
-                        isActive  -> RedBright
-                        else      -> GreenDark
-                    },
-                    disabledContainerColor = Color(0xFF1E1E1E)
+            // ── Aviso de carga + juego ────────────────────────────────────────
+            if (stats.isCharging && isActive) {
+                WarningBanner(
+                    icon = "⚠",
+                    title = "CARGANDO MIENTRAS JUEGAS",
+                    message = "El A06 se sobrecalienta. Desconecta el cargador para partidas largas.",
+                    color = OrangeAcc,
+                    bgColor = Color(0xFF1A0800)
                 )
-            ) {
-                Text(when {
-                    isLoading -> "APLICANDO OPTIMIZACIONES..."
-                    isActive  -> "DESACTIVAR MODO JUEGO"
-                    else      -> "ACTIVAR MODO JUEGO"
-                }, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
 
-            // ── Botón secundario: Limpiar RAM manualmente ─────────────────────
-            if (isActive) {
-                val coroutineScope = rememberCoroutineScope()
-                var ramCleaning by remember { mutableStateOf(false) }
-                OutlinedButton(
-                    onClick = {
-                        if (!ramCleaning) {
-                            coroutineScope.launch {
-                                ramCleaning = true
-                                ShizukuHelper.run("am kill-all")
-                                delay(800L)
-                                ramFree = getAvailableRamMb(context)
-                                ramCleaning = false
-                            }
+            // ── Shizuku setup ─────────────────────────────────────────────────
+            if (shizukuStatus != ShizukuStatus.READY) {
+                ShizukuSetupCard(
+                    status = shizukuStatus,
+                    onRetry = {
+                        shizukuStatus = when {
+                            !ShizukuHelper.isShizukuAvailable() -> ShizukuStatus.UNAVAILABLE
+                            !ShizukuHelper.hasPermission()       -> ShizukuStatus.NO_PERMISSION
+                            else                                  -> ShizukuStatus.READY
                         }
-                    },
-                    enabled = !ramCleaning,
-                    modifier = Modifier.fillMaxWidth().height(46.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    border = androidx.compose.foundation.BorderStroke(1.dp, TealAcc.copy(alpha = 0.5f))
-                ) {
-                    Text(
-                        if (ramCleaning) "Limpiando RAM..." else "Limpiar RAM ahora",
-                        fontSize = 13.sp,
-                        color = if (ramCleaning) Color.White.copy(alpha = 0.4f) else TealAcc,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
+                        if (shizukuStatus == ShizukuStatus.NO_PERMISSION)
+                            ShizukuHelper.requestPermission()
+                    }
+                )
             }
 
-            // ── Tips ──────────────────────────────────────────────────────────
-            Card(modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF141000)),
-                shape = RoundedCornerShape(16.dp)) {
-                Column(Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                    Text("ANTES DE CADA PARTIDA", fontSize = 10.sp,
-                        color = YellowAcc.copy(alpha = 0.8f), fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.5.sp)
-                    TipItem("Activa esta app PRIMERO → luego abre Free Fire")
-                    TipItem("Cierra todas las apps del historial reciente")
-                    TipItem("Activa modo avión → desactívalo (ping más limpio)")
-                    TipItem("Batería mínimo 50 % y no cargando si puedes")
-                    TipItem("Si aparece aviso de temp: pausa 2 min antes de continuar")
-                    TipItem("Gráficos FF: Suave · Velocidad: Máxima · Sombras: OFF")
-                }
+            // ── Fase 2 activa ─────────────────────────────────────────────────
+            if (isActive && isPhase2) {
+                Phase2Banner()
             }
 
-            // Actualizacion
+            // ── Cuenta regresiva a Fase 2 ─────────────────────────────────────
+            if (isActive && !isPhase2 && countdown.isNotEmpty()) {
+                CountdownBanner(countdown = countdown)
+            }
+
+            // ── Botón principal ───────────────────────────────────────────────
+            MainToggleButton(
+                isActive  = isActive,
+                isLoading = isLoading,
+                isPhase2  = isPhase2,
+                countdown = countdown,
+                onToggle  = {
+                    if (isLoading) return@MainToggleButton
+                    isLoading = true
+                    updateScope.launch {
+                        try {
+                            if (!isActive) {
+                                Prefs.setActive(context, true)
+                                Prefs.startLongGame(context)
+                                GameService.start(context)
+                                delay(600L)
+                                ShizukuHelper.enableGameMode()
+                                isActive = true
+                                isPhase2 = false
+                            } else {
+                                GameService.stop(context)
+                                Prefs.setActive(context, false)
+                                delay(400L)
+                                ShizukuHelper.disableGameMode()
+                                isActive  = false
+                                isPhase2  = false
+                                countdown = ""
+                                sessionTime = ""
+                            }
+                        } catch (e: Exception) {
+                            // Error gracioso: nunca crash
+                            Prefs.setActive(context, isActive.not())
+                            isActive = Prefs.isActive(context)
+                        } finally {
+                            isLoading = false
+                        }
+                    }
+                }
+            )
+
+            // ── Monitor en tiempo real (solo cuando está activo) ──────────────
+            if (isActive) {
+                MonitorCard(
+                    stats     = stats,
+                    maxFreq   = maxFreq,
+                    freqPct   = freqPct,
+                    freqColor = freqColor,
+                    ramColor  = ramColor,
+                    tempColor = tempColor,
+                    tempLabel = tempLabel,
+                    isPhase2  = isPhase2,
+                    sessionTime = sessionTime
+                )
+            }
+
+            // ── Cards de información ──────────────────────────────────────────
+            OptimizationsCard()
+            Phase2InfoCard()
+            TipsCard()
+
+            // ── Actualización ─────────────────────────────────────────────────
             UpdateCard(
                 status      = updateStatus,
                 info        = updateInfo,
@@ -852,169 +360,462 @@ fun GameModeScreen(
                 onCheck = {
                     updateStatus = "checking"
                     updateScope.launch {
-                        val res = UpdateChecker.checkForUpdate(BuildConfig.VERSION_CODE)
-                        res.onSuccess { i ->
-                            updateInfo   = i
-                            updateStatus = if (i.isUpdateAvailable) "available" else "up_to_date"
-                        }.onFailure { updateStatus = "error" }
+                        UpdateChecker.checkForUpdate(BuildConfig.VERSION_CODE)
+                            .onSuccess { info ->
+                                updateInfo   = info
+                                updateStatus = if (info.isUpdateAvailable) "available" else "up_to_date"
+                            }
+                            .onFailure { updateStatus = "error" }
                     }
                 },
                 onDownload = {
-                    updateInfo?.let { i ->
+                    updateInfo?.let { info ->
                         updateStatus = "downloading"
                         dlProgress   = 0
                         updateScope.launch {
-                            val file = UpdateChecker.downloadApk(context, i.downloadUrl, i.tagName) { p ->
+                            val file = UpdateChecker.downloadApk(context, info.downloadUrl, info.tagName) { p ->
                                 withContext(Dispatchers.Main) { dlProgress = p }
                             }
-                            if (file != null) { updateStatus = "done"; UpdateChecker.installApk(context, file) }
-                            else updateStatus = "error"
+                            if (file != null) {
+                                updateStatus = "done"
+                                UpdateChecker.installApk(context, file)
+                            } else {
+                                updateStatus = "error"
+                            }
                         }
                     }
                 }
             )
 
-            Text("Solo ajustes del sistema Android · no toca archivos del juego",
+            Text(
+                "Solo ajustes del sistema Android · no modifica archivos del juego",
                 fontSize = 10.sp, color = GreyText.copy(alpha = 0.4f),
-                textAlign = TextAlign.Center)
-            Spacer(Modifier.height(8.dp))
+                textAlign = TextAlign.Center
+            )
+            Spacer(Modifier.height(12.dp))
         }
     }
 }
 
-// ── Componentes ───────────────────────────────────────────────────────────────
+// ── Componentes UI ────────────────────────────────────────────────────────────
+
 @Composable
-private fun MonitorMetric(value: String, label: String, hint: String, color: Color) {
+private fun HeaderSection() {
     Column(horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(value, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = color)
-        Text(label, fontSize = 10.sp, color = GreyText)
-        Text(hint,  fontSize = 10.sp, color = color.copy(alpha = 0.7f))
+        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(
+            "GameModeAI",
+            fontSize = 26.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            letterSpacing = 1.sp
+        )
+        Text(
+            "Galaxy A06  ·  Exynos 850  ·  Gaming",
+            fontSize = 11.sp,
+            color = GreyText
+        )
+        Text(
+            "v${BuildConfig.VERSION_NAME}",
+            fontSize = 10.sp,
+            color = GreyText.copy(alpha = 0.6f),
+            modifier = Modifier
+                .clip(RoundedCornerShape(6.dp))
+                .background(Color(0xFF141414))
+                .padding(horizontal = 8.dp, vertical = 2.dp)
+        )
     }
 }
 
 @Composable
-private fun OptCard(title: String, titleColor: Color, bg: Color,
-                    content: @Composable ColumnScope.() -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = bg),
-        shape = RoundedCornerShape(16.dp)) {
-        Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text(title, fontSize = 10.sp, color = titleColor.copy(alpha = 0.9f),
-                fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-            content()
+private fun WarningBanner(icon: String, title: String, message: String,
+                          color: Color, bgColor: Color) {
+    Box(
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(bgColor)
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text(icon, fontSize = 16.sp)
+            Column {
+                Text(title, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    color = color, letterSpacing = 0.5.sp)
+                Text(message, fontSize = 11.sp,
+                    color = Color.White.copy(alpha = 0.65f))
+            }
         }
     }
 }
 
-@Composable private fun Phase2Item(text: String) =
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("✦", fontSize = 11.sp, color = TealAcc)
-        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f)) }
-
-@Composable private fun TempItem(text: String) =
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("❄", fontSize = 11.sp, color = CyanAcc)
-        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f)) }
-
-@Composable private fun GOSItem(text: String) =
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("◉", fontSize = 11.sp, color = CyanAcc)
-        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f)) }
-
-@Composable private fun AimItem(text: String) =
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("◈", fontSize = 12.sp, color = PurpleAcc)
-        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f)) }
-
-@Composable private fun A06Item(text: String) =
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("⚡", fontSize = 11.sp, color = YellowAcc)
-        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f)) }
-
-@Composable private fun OptItem(text: String) =
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("✓", fontSize = 12.sp, color = GreenBright)
-        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f)) }
-
-@Composable private fun TipItem(text: String) =
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("›", fontSize = 13.sp, color = YellowAcc)
-        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f)) }
-
-@Composable private fun SetupStep(number: String, text: String) =
-    Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Box(
-            modifier = Modifier.size(20.dp).clip(CircleShape).background(RedBright.copy(alpha = 0.2f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(number, fontSize = 11.sp, color = RedBright, fontWeight = FontWeight.Bold)
-        }
-        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f),
-            modifier = Modifier.weight(1f))
-    }
-
+enum class ShizukuStatus { UNAVAILABLE, NO_PERMISSION, READY }
 
 @Composable
-private fun UpdateCard(
-    status: String,
-    info: UpdateInfo?,
-    progress: Int,
-    currentCode: Int,
-    onCheck: () -> Unit,
-    onDownload: () -> Unit
+private fun ShizukuSetupCard(status: ShizukuStatus, onRetry: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF160010)),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.size(8.dp).clip(CircleShape).background(YellowAcc))
+                Text(
+                    if (status == ShizukuStatus.NO_PERMISSION)
+                        "SHIZUKU SIN PERMISO" else "SHIZUKU NO ACTIVO",
+                    fontSize = 10.sp, color = YellowAcc,
+                    fontWeight = FontWeight.Bold, letterSpacing = 1.sp
+                )
+            }
+            Text(
+                if (status == ShizukuStatus.NO_PERMISSION)
+                    "Shizuku está instalado pero necesita permiso de esta app."
+                else
+                    "La app funciona sin Shizuku pero con funciones limitadas. Para activar todas las optimizaciones:",
+                fontSize = 12.sp, color = Color.White.copy(alpha = 0.75f)
+            )
+            if (status == ShizukuStatus.UNAVAILABLE) {
+                SetupStep("1", "Instala Shizuku desde Play Store")
+                SetupStep("2", "Abre Shizuku → 'Iniciar mediante ADB inalámbrico'")
+                SetupStep("3", "Sigue las instrucciones en pantalla de Shizuku")
+            }
+            Button(
+                onClick = onRetry,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(10.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2A1A00))
+            ) {
+                Text(
+                    if (status == ShizukuStatus.NO_PERMISSION)
+                        "Conceder permiso a Shizuku"
+                    else
+                        "Verificar estado de Shizuku",
+                    fontSize = 13.sp, color = YellowAcc, fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun Phase2Banner() {
+    Box(
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.horizontalGradient(
+                listOf(Color(0xFF0D2B25), Color(0xFF0A3320))))
+            .padding(14.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Box(Modifier.size(10.dp).clip(CircleShape).background(TealAcc))
+            Column {
+                Text("FASE 2 ACTIVA — PARTIDA LARGA",
+                    fontSize = 10.sp, color = TealAcc,
+                    fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("Brillo al 29% · mínimo fondo · temperatura controlada",
+                    fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
+            }
+        }
+    }
+}
+
+@Composable
+private fun CountdownBanner(countdown: String) {
+    Box(
+        modifier = Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color(0xFF141400))
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+    ) {
+        Row(Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text("FASE 2 TÉRMICA", fontSize = 10.sp,
+                    color = YellowAcc.copy(alpha = 0.8f),
+                    fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("Brillo reducido + limpieza al llegar a 0",
+                    fontSize = 11.sp, color = Color.White.copy(alpha = 0.5f))
+            }
+            Text(countdown, fontSize = 28.sp,
+                fontWeight = FontWeight.Bold, color = YellowAcc)
+        }
+    }
+}
+
+@Composable
+private fun MainToggleButton(
+    isActive: Boolean, isLoading: Boolean,
+    isPhase2: Boolean, countdown: String,
+    onToggle: () -> Unit
+) {
+    Button(
+        onClick = onToggle,
+        enabled = !isLoading,
+        modifier = Modifier.fillMaxWidth().height(88.dp),
+        shape = RoundedCornerShape(20.dp),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = if (isActive) Color(0xFF0D3B1E) else Color(0xFF141414),
+            disabledContainerColor = Color(0xFF0A0A0A)
+        ),
+        elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+    ) {
+        if (isLoading) {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                CircularProgressIndicator(
+                    color = GreenBright,
+                    modifier = Modifier.size(24.dp),
+                    strokeWidth = 2.5.dp
+                )
+                Text("Aplicando optimizaciones...",
+                    fontSize = 14.sp, color = GreenBright.copy(alpha = 0.8f))
+            }
+        } else {
+            Column(horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    if (isActive) "● MODO JUEGO ACTIVO" else "○ MODO JUEGO INACTIVO",
+                    fontSize = 22.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isActive) GreenBright else GreyText
+                )
+                if (isActive) {
+                    Text(
+                        if (isPhase2) "Fase 2 · temp controlada · rendimiento máximo"
+                        else "Optimizaciones activas · Fase 2 en $countdown",
+                        fontSize = 11.sp, color = GreenBright.copy(alpha = 0.6f)
+                    )
+                } else {
+                    Text("Toca para activar todas las optimizaciones",
+                        fontSize = 11.sp, color = GreyText.copy(alpha = 0.6f))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MonitorCard(
+    stats: SystemStats, maxFreq: Int,
+    freqPct: Float, freqColor: Color,
+    ramColor: Color, tempColor: Color,
+    tempLabel: String, isPhase2: Boolean,
+    sessionTime: String
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFF0A0D14)),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0A1400)),
+        shape = RoundedCornerShape(18.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            Row(Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("MONITOR EN VIVO", fontSize = 10.sp,
+                    color = GreenBright.copy(alpha = 0.7f),
+                    fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (sessionTime.isNotEmpty()) {
+                        Text(sessionTime, fontSize = 11.sp, color = GreyText)
+                    }
+                    Box(Modifier.size(8.dp).clip(CircleShape)
+                        .background(if (isPhase2) TealAcc else GreenBright))
+                }
+            }
+
+            Row(Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly) {
+                val cpuHz = if (stats.cpuMhz > 0) "${stats.cpuMhz}" else "—"
+                val cpuPct = if (stats.cpuMhz > 0 && maxFreq > 0)
+                    "${(freqPct * 100).roundToInt()}%" else "—"
+                MetricBlock(cpuHz, "CPU MHz", cpuPct, freqColor)
+
+                val tempStr = if (stats.cpuTempC > 0f) "${stats.cpuTempC.roundToInt()}°C" else "—"
+                MetricBlock(tempStr, "CPU Temp", tempLabel, tempColor)
+
+                val ramPct = if (stats.totalRamMb > 0)
+                    "${((stats.ramFreeMb.toFloat() / stats.totalRamMb) * 100).roundToInt()}%"
+                else "—"
+                MetricBlock("${stats.ramFreeMb}", "RAM MB libre", ramPct, ramColor)
+
+                val batStr = if (stats.batteryPct > 0) "${stats.batteryPct}%" else "—"
+                val batColor = when {
+                    stats.isCharging -> BlueAcc
+                    stats.batteryPct > 50 -> GreenBright
+                    stats.batteryPct > 20 -> YellowAcc
+                    else -> RedBright
+                }
+                MetricBlock(batStr, "Batería",
+                    if (stats.isCharging) "Cargando" else "En uso", batColor)
+            }
+
+            // Temperatura batería si disponible
+            if (stats.batteryTempC > 0f) {
+                val btColor = when {
+                    stats.batteryTempC < 35f -> GreenBright
+                    stats.batteryTempC < 42f -> YellowAcc
+                    else -> RedBright
+                }
+                Row(Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.Center) {
+                    Text("Temp. batería: ${stats.batteryTempC}°C",
+                        fontSize = 11.sp, color = btColor)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MetricBlock(value: String, label: String, hint: String, color: Color) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(value, fontSize = 20.sp, fontWeight = FontWeight.Bold, color = color)
+        Text(label, fontSize = 9.sp, color = GreyText)
+        Text(hint, fontSize = 9.sp, color = color.copy(alpha = 0.7f))
+    }
+}
+
+@Composable
+private fun OptimizationsCard() {
+    Card(modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = CardBg),
+        shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("OPTIMIZACIONES ACTIVAS", fontSize = 10.sp, color = GreenBright.copy(alpha = 0.8f),
+                fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            OptItem("GOS · GameHome · GameTools desactivados")
+            OptItem("Animaciones del sistema desactivadas (0ms)")
+            OptItem("NFC · GPS · Sync · Escaneo WiFi desactivados")
+            OptItem("Brillo manual optimizado · pantalla completa")
+            OptItem("AIM: sin haptic · sin debounce táctil · sin predicción")
+            OptItem("Free Fire: prioridad máxima del sistema")
+            OptItem("Bixby · Digital Wellbeing · apps Samsung pausadas")
+            OptItem("Red WiFi: power-save desactivado · anti-jitter")
+            OptItem("GPU Vulkan optimizado para Exynos 850")
+            OptItem("AOT compilation de Free Fire en background")
+        }
+    }
+}
+
+@Composable
+private fun Phase2InfoCard() {
+    Card(modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF080F0C)),
+        shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("FASE 2 — PARTIDA LARGA (20 min)", fontSize = 10.sp,
+                color = TealAcc.copy(alpha = 0.9f),
+                fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+            Phase2Item("Brillo baja a 29 % (panel LCD = calor #1 del A06)")
+            Phase2Item("Limpieza completa de todos los procesos en fondo")
+            Phase2Item("Prioridad máxima de Free Fire reconfirmada")
+            Phase2Item("Mantenimiento automático cada 5 minutos")
+        }
+    }
+}
+
+@Composable
+private fun TipsCard() {
+    Card(modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0D0D00)),
+        shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)) {
+            Text("ANTES DE CADA PARTIDA", fontSize = 10.sp,
+                color = YellowAcc.copy(alpha = 0.8f),
+                fontWeight = FontWeight.Bold, letterSpacing = 1.5.sp)
+            TipItem("Activa esta app PRIMERO → luego abre Free Fire")
+            TipItem("Cierra todas las apps del historial reciente")
+            TipItem("Activa modo avión → desactívalo (limpia el ping)")
+            TipItem("Batería mínimo 50 % · sin cargador si puedes")
+            TipItem("Gráficos FF: Suave · Velocidad: Máxima · Sombras: OFF")
+        }
+    }
+}
+
+@Composable
+private fun UpdateCard(
+    status: String, info: UpdateInfo?, progress: Int,
+    currentCode: Int, onCheck: () -> Unit, onDownload: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF08080F)),
         shape = RoundedCornerShape(14.dp)
     ) {
-        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+        Column(Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically) {
-                Text("ACTUALIZACIÓN", fontSize = 10.sp, color = BlueAcc.copy(alpha = 0.8f),
+                Text("ACTUALIZACIÓN", fontSize = 10.sp,
+                    color = BlueAcc.copy(alpha = 0.8f),
                     fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
                 Text("build #$currentCode", fontSize = 10.sp, color = GreyText)
             }
             when (status) {
                 "idle" -> OutlinedButton(
-                    onClick = onCheck, modifier = Modifier.fillMaxWidth().height(40.dp),
+                    onClick = onCheck,
+                    modifier = Modifier.fillMaxWidth().height(40.dp),
                     shape = RoundedCornerShape(10.dp),
                     border = androidx.compose.foundation.BorderStroke(1.dp, BlueAcc.copy(alpha = 0.4f))
                 ) { Text("Verificar actualización", fontSize = 12.sp, color = BlueAcc) }
+
                 "checking" -> {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = BlueAcc,
-                        trackColor = Color(0xFF1A2030))
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(),
+                        color = BlueAcc, trackColor = Color(0xFF1A2030))
                     Text("Verificando en GitHub...", fontSize = 12.sp, color = GreyText)
                 }
+
                 "up_to_date" -> {
                     Text("✓ Ya tienes la última versión", fontSize = 12.sp, color = GreenBright)
-                    OutlinedButton(onClick = onCheck, modifier = Modifier.fillMaxWidth().height(36.dp),
+                    OutlinedButton(onClick = onCheck,
+                        modifier = Modifier.fillMaxWidth().height(36.dp),
                         shape = RoundedCornerShape(8.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, GreyText.copy(alpha = 0.25f))
+                        border = androidx.compose.foundation.BorderStroke(1.dp, GreyText.copy(alpha = 0.2f))
                     ) { Text("Volver a verificar", fontSize = 11.sp, color = GreyText) }
                 }
+
                 "available" -> info?.let { i ->
-                    Text("⬆ Nueva versión disponible: ${i.tagName}", fontSize = 12.sp, color = YellowAcc,
+                    Text("⬆ Nueva versión: ${i.tagName}",
+                        fontSize = 12.sp, color = YellowAcc,
                         fontWeight = FontWeight.SemiBold)
-                    Button(onClick = onDownload, modifier = Modifier.fillMaxWidth().height(44.dp),
+                    Button(onClick = onDownload,
+                        modifier = Modifier.fillMaxWidth().height(44.dp),
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = BlueAcc)
-                    ) { Text("Descargar e instalar ${i.tagName}", fontSize = 13.sp,
-                        color = Color.Black, fontWeight = FontWeight.Bold) }
+                    ) { Text("Descargar e instalar ${i.tagName}",
+                        fontSize = 13.sp, color = Color.Black, fontWeight = FontWeight.Bold) }
                 }
+
                 "downloading" -> {
-                    Text("Descargando... $progress%", fontSize = 12.sp, color = BlueAcc,
-                        fontWeight = FontWeight.SemiBold)
-                    LinearProgressIndicator(progress = { progress / 100f },
-                        modifier = Modifier.fillMaxWidth(), color = BlueAcc,
-                        trackColor = Color(0xFF1A2030))
+                    Text("Descargando... $progress%", fontSize = 12.sp,
+                        color = BlueAcc, fontWeight = FontWeight.SemiBold)
+                    LinearProgressIndicator(
+                        progress = { progress / 100f },
+                        modifier = Modifier.fillMaxWidth(),
+                        color = BlueAcc, trackColor = Color(0xFF1A2030)
+                    )
                 }
+
                 "done" -> Text("✓ Descarga completa — sigue el instalador del sistema",
                     fontSize = 12.sp, color = GreenBright)
+
                 "error" -> {
-                    Text("✕ Error al verificar. Revisa tu conexión.", fontSize = 12.sp, color = RedBright)
-                    OutlinedButton(onClick = onCheck, modifier = Modifier.fillMaxWidth().height(36.dp),
+                    Text("✕ Error al verificar. Revisa tu conexión.",
+                        fontSize = 12.sp, color = RedBright)
+                    OutlinedButton(onClick = onCheck,
+                        modifier = Modifier.fillMaxWidth().height(36.dp),
                         shape = RoundedCornerShape(8.dp),
                         border = androidx.compose.foundation.BorderStroke(1.dp, RedBright.copy(alpha = 0.3f))
                     ) { Text("Reintentar", fontSize = 11.sp, color = RedBright) }
@@ -1024,6 +825,42 @@ private fun UpdateCard(
     }
 }
 
+// ── Micro-componentes ─────────────────────────────────────────────────────────
+
+@Composable private fun Phase2Item(text: String) =
+    Row(verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("✦", fontSize = 11.sp, color = TealAcc)
+        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f))
+    }
+
+@Composable private fun OptItem(text: String) =
+    Row(verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("✓", fontSize = 12.sp, color = GreenBright)
+        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.85f))
+    }
+
+@Composable private fun TipItem(text: String) =
+    Row(verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("›", fontSize = 13.sp, color = YellowAcc)
+        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f))
+    }
+
+@Composable private fun SetupStep(number: String, text: String) =
+    Row(verticalAlignment = Alignment.Top,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Box(
+            modifier = Modifier.size(20.dp).clip(CircleShape)
+                .background(YellowAcc.copy(alpha = 0.15f)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(number, fontSize = 11.sp, color = YellowAcc, fontWeight = FontWeight.Bold)
+        }
+        Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f),
+            modifier = Modifier.weight(1f))
+    }
 
 @Composable
 fun GameModeAITheme(content: @Composable () -> Unit) {

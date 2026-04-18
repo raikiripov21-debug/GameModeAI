@@ -1,12 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Tema de arranque para la activity — Compose toma el control al instante.
-         Usamos android:Theme.Material.NoActionBar (nativo Android) en lugar de
-         Theme.AppCompat para no necesitar la libreria appcompat. -->
+    <!--
+        Tema de arranque para la activity.
+        Compose toma el control inmediatamente, pero este tema evita
+        la pantalla blanca mientras Compose carga el contenido.
+        Usamos android:Theme.Material.NoActionBar (nativo, sin appcompat)
+        para reducir el tiempo de inicio y evitar dependencias innecesarias.
+    -->
     <style name="Theme.GameModeAI" parent="android:Theme.Material.NoActionBar">
+        <!-- Fondo negro desde el primer fotograma, sin pantalla blanca -->
         <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <!-- Barras de estado/navegación transparentes -->
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
         <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+        <!-- Optimización: sin fondo extra que Compose reemplaza inmediatamente -->
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">false</item>
     </style>
 </resources>

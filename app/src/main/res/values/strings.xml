@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">GameModeAI</string>
+    <string name="notif_channel_name">Game Mode AI</string>
+    <string name="notif_channel_desc">Estado del modo juego activo</string>
+</resources>

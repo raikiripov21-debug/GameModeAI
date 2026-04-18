@@ -7,19 +7,26 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    <!-- Necesario para instalar APKs descargados (auto-actualización) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Necesario para detectar si Free Fire está instalado/corriendo -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"
+        tools:ignore="QueryAllPackagesPermission"
+        xmlns:tools="http://schemas.android.com/tools"/>
 
     <application
-        android:allowBackup="true"
-        android:label="GameModeAI"
-        android:supportsRtl="true"
+        android:allowBackup="false"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="false"
+        android:hardwareAccelerated="true"
+        android:largeHeap="false"
         android:theme="@style/Theme.GameModeAI">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="portrait">
+            android:screenOrientation="portrait"
+            android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
@@ -29,19 +36,25 @@
         <service
             android:name=".GameService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="game_mode_optimization" />
         </service>
 
-        <!-- BootReceiver: reactiva el modo juego automaticamente tras reiniciar -->
+        <!--
+            BootReceiver: reactiva el modo juego automáticamente tras reiniciar.
+            exported=true es necesario en Android 12+ para recibir broadcasts del sistema.
+        -->
         <receiver
             android:name=".BootReceiver"
-            android:exported="false">
-            <intent-filter>
+            android:exported="true"
+            android:enabled="true">
+            <intent-filter android:priority="999">
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </receiver>
@@ -54,7 +67,6 @@
             android:enabled="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
-        <!-- FileProvider para compartir el APK descargado con el instalador -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

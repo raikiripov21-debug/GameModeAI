@@ -1,23 +1,40 @@
-# GameModeAI ProGuard Rules
+# GameModeAI ProGuard / R8 Rules
 
-# Shizuku - mantener todas las clases de la API
+# ── Shizuku API ────────────────────────────────────────────────────────────────
 -keep class rikka.shizuku.** { *; }
 -keep interface rikka.shizuku.** { *; }
 -keepclassmembers class rikka.shizuku.** { *; }
 -dontwarn rikka.shizuku.**
 
-# Mantener IInterface de Android para Shizuku
+# IInterface e IBinder necesarios para Shizuku
 -keep class android.os.IInterface { *; }
 -keep class android.os.IBinder { *; }
 
-# Evitar que R8 elimine anotaciones de Compose runtime
+# ── Compose ────────────────────────────────────────────────────────────────────
 -keepclassmembers class androidx.compose.** { *; }
+-dontwarn androidx.compose.**
 
-# Coroutines
+# ── Coroutines ─────────────────────────────────────────────────────────────────
 -keepclassmembers class kotlinx.coroutines.** { *; }
 -dontwarn kotlinx.coroutines.**
+-keep class kotlinx.coroutines.android.** { *; }
 
-# Reglas genéricas de Android
+# ── JSON (org.json nativo de Android) ──────────────────────────────────────────
+-keep class org.json.** { *; }
+
+# ── Atributos de depuración ────────────────────────────────────────────────────
 -keepattributes *Annotation*
 -keepattributes SourceFile,LineNumberTable
+-keepattributes Signature
 -keep public class * extends java.lang.Exception
+
+# ── Optimizaciones agresivas para APK pequeño ─────────────────────────────────
+-optimizationpasses 5
+-dontusemixedcaseclassnames
+-dontskipnonpubliclibraryclasses
+-verbose
+
+# ── Evitar advertencias en bibliotecas de Kotlin ──────────────────────────────
+-dontwarn kotlin.**
+-dontwarn kotlin.reflect.**
+-dontwarn kotlinx.**

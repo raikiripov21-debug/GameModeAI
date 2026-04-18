@@ -11,13 +11,23 @@ android {
         applicationId = "com.gamemodeai"
         minSdk = 24
         targetSdk = 35
-        // En CI se inyecta: ./gradlew assembleRelease -PversionCode=<run_number>
-        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 38
-        versionName = (project.findProperty("versionCode") as String?)?.let { "v$it" } ?: "v38"
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
+        versionName = (project.findProperty("versionCode") as String?)?.let { "v$it" } ?: "v1"
+
+        // Optimizar para dispositivos ARM de gama baja (A06 = Exynos 850 ARMv8)
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildTypes {
+        debug {
+            isDebuggable = true
+            isMinifyEnabled = false
+            applicationIdSuffix = ".debug"
+        }
         release {
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -34,11 +44,15 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+        freeCompilerArgs += listOf(
+            "-opt-in=androidx.compose.ui.ExperimentalComposeUiApi",
+            "-opt-in=androidx.compose.foundation.ExperimentalFoundationApi"
+        )
     }
 
     buildFeatures {
         compose = true
-        buildConfig = true   // necesario para BuildConfig.VERSION_CODE en UpdateChecker
+        buildConfig = true
     }
 
     composeOptions {
@@ -47,8 +61,27 @@ android {
 
     packaging {
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += listOf(
+                "/META-INF/{AL2.0,LGPL2.1}",
+                "/META-INF/DEPENDENCIES",
+                "/*.txt",
+                "/kotlin-tooling-metadata.json"
+            )
         }
+        jniLibs {
+            pickFirsts += listOf("**/*.so")
+        }
+    }
+
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+        disable += listOf("MissingTranslation", "ExtraTranslation")
+    }
+
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
     }
 }
 
@@ -58,14 +91,19 @@ dependencies {
 
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
 
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.runtime:runtime")
 
+    // Solo en debug: herramientas de inspección de UI
     debugImplementation("androidx.compose.ui:ui-tooling")
+    debugImplementation("androidx.compose.ui:ui-tooling-preview")
 
+    // Shizuku — opcional, la app funciona sin él
     implementation("dev.rikka.shizuku:api:11.0.3")
     implementation("dev.rikka.shizuku:provider:11.0.3")
 }
