@@ -278,7 +278,7 @@ fun GameModeScreen(
             Row(verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("GameModeAI", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                Text("v1.1", fontSize = 11.sp, color = GreyText,
+                Text(BuildConfig.VERSION_NAME, fontSize = 11.sp, color = GreyText,
                     modifier = Modifier
                         .clip(RoundedCornerShape(6.dp))
                         .background(Color(0xFF1E1E1E))
