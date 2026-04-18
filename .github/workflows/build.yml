@@ -7,6 +7,10 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# Permiso de escritura necesario para crear GitHub Releases con el APK
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Debug & Release APK
@@ -57,7 +61,7 @@ jobs:
           retention-days: 30
 
       # Solo en push a main: crea un GitHub Release público con el APK
-      # Esto permite que la app descargue actualizaciones directamente
+      # Esto permite que la app descargue actualizaciones directamente sin abrir el navegador
       - name: Crear GitHub Release con APK
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
