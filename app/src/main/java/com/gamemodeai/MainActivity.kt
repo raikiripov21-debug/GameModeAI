@@ -14,6 +14,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -158,6 +160,12 @@ fun GameModeScreen(
     var thermalEmergency by remember { mutableStateOf(false) }
 
     var actionMessage by remember { mutableStateOf("") }
+
+    // Actualizacion de la app
+    var updateStatus by remember { mutableStateOf("idle") }
+    var updateInfo   by remember { mutableStateOf<UpdateInfo?>(null) }
+    var dlProgress   by remember { mutableIntStateOf(0) }
+    val updateScope  = rememberCoroutineScope()
 
     // Emergencia térmica automática: si temp ≥ 48°C, aplicar enfriamiento de emergencia
     val thermalScope = rememberCoroutineScope()
@@ -768,6 +776,37 @@ fun GameModeScreen(
                 }
             }
 
+            // Actualizacion
+            UpdateCard(
+                status      = updateStatus,
+                info        = updateInfo,
+                progress    = dlProgress,
+                currentCode = BuildConfig.VERSION_CODE,
+                onCheck = {
+                    updateStatus = "checking"
+                    updateScope.launch {
+                        val res = UpdateChecker.checkForUpdate(BuildConfig.VERSION_CODE)
+                        res.onSuccess { i ->
+                            updateInfo   = i
+                            updateStatus = if (i.isUpdateAvailable) "available" else "up_to_date"
+                        }.onFailure { updateStatus = "error" }
+                    }
+                },
+                onDownload = {
+                    updateInfo?.let { i ->
+                        updateStatus = "downloading"
+                        dlProgress   = 0
+                        updateScope.launch {
+                            val file = UpdateChecker.downloadApk(context, i.downloadUrl, i.tagName) { p ->
+                                withContext(Dispatchers.Main) { dlProgress = p }
+                            }
+                            if (file != null) { updateStatus = "done"; UpdateChecker.installApk(context, file) }
+                            else updateStatus = "error"
+                        }
+                    }
+                }
+            )
+
             Text("Solo ajustes del sistema Android · no toca archivos del juego",
                 fontSize = 10.sp, color = GreyText.copy(alpha = 0.4f),
                 textAlign = TextAlign.Center)
@@ -847,6 +886,77 @@ private fun OptCard(title: String, titleColor: Color, bg: Color,
         Text(text, fontSize = 12.sp, color = Color.White.copy(alpha = 0.8f),
             modifier = Modifier.weight(1f))
     }
+
+
+@Composable
+private fun UpdateCard(
+    status: String,
+    info: UpdateInfo?,
+    progress: Int,
+    currentCode: Int,
+    onCheck: () -> Unit,
+    onDownload: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF0A0D14)),
+        shape = RoundedCornerShape(14.dp)
+    ) {
+        Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically) {
+                Text("ACTUALIZACIÓN", fontSize = 10.sp, color = BlueAcc.copy(alpha = 0.8f),
+                    fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                Text("build #$currentCode", fontSize = 10.sp, color = GreyText)
+            }
+            when (status) {
+                "idle" -> OutlinedButton(
+                    onClick = onCheck, modifier = Modifier.fillMaxWidth().height(40.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, BlueAcc.copy(alpha = 0.4f))
+                ) { Text("Verificar actualización", fontSize = 12.sp, color = BlueAcc) }
+                "checking" -> {
+                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth(), color = BlueAcc,
+                        trackColor = Color(0xFF1A2030))
+                    Text("Verificando en GitHub...", fontSize = 12.sp, color = GreyText)
+                }
+                "up_to_date" -> {
+                    Text("✓ Ya tienes la última versión", fontSize = 12.sp, color = GreenBright)
+                    OutlinedButton(onClick = onCheck, modifier = Modifier.fillMaxWidth().height(36.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, GreyText.copy(alpha = 0.25f))
+                    ) { Text("Volver a verificar", fontSize = 11.sp, color = GreyText) }
+                }
+                "available" -> info?.let { i ->
+                    Text("⬆ Nueva versión disponible: ${i.tagName}", fontSize = 12.sp, color = YellowAcc,
+                        fontWeight = FontWeight.SemiBold)
+                    Button(onClick = onDownload, modifier = Modifier.fillMaxWidth().height(44.dp),
+                        shape = RoundedCornerShape(10.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = BlueAcc)
+                    ) { Text("Descargar e instalar ${i.tagName}", fontSize = 13.sp,
+                        color = Color.Black, fontWeight = FontWeight.Bold) }
+                }
+                "downloading" -> {
+                    Text("Descargando... $progress%", fontSize = 12.sp, color = BlueAcc,
+                        fontWeight = FontWeight.SemiBold)
+                    LinearProgressIndicator(progress = { progress / 100f },
+                        modifier = Modifier.fillMaxWidth(), color = BlueAcc,
+                        trackColor = Color(0xFF1A2030))
+                }
+                "done" -> Text("✓ Descarga completa — sigue el instalador del sistema",
+                    fontSize = 12.sp, color = GreenBright)
+                "error" -> {
+                    Text("✕ Error al verificar. Revisa tu conexión.", fontSize = 12.sp, color = RedBright)
+                    OutlinedButton(onClick = onCheck, modifier = Modifier.fillMaxWidth().height(36.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, RedBright.copy(alpha = 0.3f))
+                    ) { Text("Reintentar", fontSize = 11.sp, color = RedBright) }
+                }
+            }
+        }
+    }
+}
+
 
 @Composable
 fun GameModeAITheme(content: @Composable () -> Unit) {
