@@ -14,9 +14,9 @@ android {
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("versionCode") as String?)?.let { "v$it" } ?: "v1"
         buildConfigField("String", "TARGET_DEVICE", "\"moto_g04s\"")
-        buildConfigField("Int", "CPU_CORES", "8")
-        buildConfigField("Int", "MAX_RAM_MB", "4096")
-        buildConfigField("Int", "TEMP_THRESHOLD", "36")
+        buildConfigField("int", "CPU_CORES", "8")
+        buildConfigField("int", "MAX_RAM_MB", "4096")
+        buildConfigField("int", "TEMP_THRESHOLD", "36")
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
