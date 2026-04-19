@@ -45,11 +45,11 @@ class GameService : Service() {
     private lateinit var notificationManager: NotificationManager
     private var monitorJob: Job? = null
     private var aotJob:     Job? = null
-    // true mientras la compilación AOT de Free Fire esté en curso
     private val aotRunning  = AtomicBoolean(false)
-    // WakeLock parcial: evita que el Exynos 850 del A06 entre en deep sleep
-    // mientras el servicio aplica el mantenimiento cada 5 minutos.
     private var wakeLock: PowerManager.WakeLock? = null
+
+    // OptimizerEngine — último estado del sistema para el adaptive loop
+    @Volatile private var lastHealthLabel: String = "Estable"
 
     override fun onCreate() {
         super.onCreate()
@@ -64,23 +64,18 @@ class GameService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         monitorJob?.cancel()
 
-        // Mantenimiento inmediato al arrancar: re-aplica ajustes críticos
-          // sin esperar 5 minutos. Útil tras reinicio del servicio o del teléfono.
-          serviceScope.launch {
-              delay(4_000L)   // esperar 4 s a que Shizuku esté listo
-              ShizukuHelper.applyMaintenanceMode()
-          }
+        // Mantenimiento inmediato al arrancar
+        serviceScope.launch {
+            delay(4_000L)
+            ShizukuHelper.applyMaintenanceMode()
+        }
 
-          // Solo registrar tiempo de inicio si no hay uno ya (evita resetear el contador
-        // cuando Android reinicia el servicio con START_STICKY después de matarlo).
         val alreadyRunning = Prefs.getLongGameStartMs(this) > 0L
         if (!alreadyRunning) {
             Prefs.startLongGame(this)
         }
 
-        // Compilación AOT de Free Fire en background (no bloquea la activación).
-        // Primera vez: 30-90 s compilando DEX → ARM nativo (elimina picos JIT durante aim).
-        // Activaciones posteriores: <2 s (ya compilado, no rehace el trabajo).
+        // AOT en background
         aotJob?.cancel()
         aotJob = serviceScope.launch {
             aotRunning.set(true)
@@ -94,24 +89,29 @@ class GameService : Service() {
 
         monitorJob = serviceScope.launch {
 
-            // Calcular minutos restantes basándose en el tiempo de inicio real
-            // (importante para recuperarse correctamente tras un reinicio de servicio)
             val startMs     = Prefs.getLongGameStartMs(this@GameService)
             val elapsedMs   = System.currentTimeMillis() - startMs
             val remainingMs = (PHASE2_DELAY_MS - elapsedMs).coerceAtLeast(0L)
             val elapsedMin  = (elapsedMs / 60_000L).coerceAtMost(20L).toInt()
 
             if (Prefs.isPhase2Active(this@GameService)) {
-                // La Fase 2 ya estaba activa — saltar directamente al bucle de mantenimiento
+                // Fase 2 ya activa — saltar al loop de mantenimiento
             } else if (remainingMs > 0L) {
-                // Contar desde los minutos ya transcurridos hacia los 20
                 var elapsed = elapsedMin
+                var minutesSinceLastFull = 0
                 while (isActive && elapsed < 20) {
-                    delay(60_000L)   // 1 minuto
+                    delay(60_000L)
                     elapsed++
-                    if (elapsed % 5 == 0) {
-                        ShizukuHelper.applyMaintenanceMode()
-                    }
+                    minutesSinceLastFull++
+
+                    // ── OptimizerEngine: mantenimiento adaptativo ─────────────
+                    val ramFree  = getAvailableRamMb(this@GameService)
+                    val ramTotal = getTotalRamMb(this@GameService)
+                    val snap = OptimizerEngine.getSnapshot(ramFree, ramTotal)
+                    lastHealthLabel = snap.healthLabel
+                    val didMaintenance = OptimizerEngine.runAdaptiveMaintenance(snap, minutesSinceLastFull)
+                    if (didMaintenance) minutesSinceLastFull = 0
+
                     val minLeft = 20 - elapsed
                     notificationManager.notify(
                         NOTIFICATION_ID,
@@ -122,18 +122,28 @@ class GameService : Service() {
                     applyPhase2()
                 }
             } else {
-                // Han pasado más de 20 minutos y Fase 2 aún no se aplicó
                 applyPhase2()
             }
 
-            // ── Bucle de mantenimiento Fase 2 ────────────────────────────────
+            // ── Bucle de mantenimiento Fase 2 (adaptativo) ───────────────────
             var phase2Elapsed = 0
+            var minutesSinceFull2 = 0
             while (isActive) {
                 delay(60_000L)
                 phase2Elapsed++
-                if (phase2Elapsed % 5 == 0) {
+                minutesSinceFull2++
+
+                val ramFree  = getAvailableRamMb(this@GameService)
+                val ramTotal = getTotalRamMb(this@GameService)
+                val snap = OptimizerEngine.getSnapshot(ramFree, ramTotal)
+                lastHealthLabel = snap.healthLabel
+                val didMaintenance = OptimizerEngine.runAdaptiveMaintenance(snap, minutesSinceFull2)
+                if (didMaintenance) {
+                    // Fase 2 siempre fuerza sus ajustes propios
                     ShizukuHelper.applyLongGameMaintenance()
+                    minutesSinceFull2 = 0
                 }
+
                 notificationManager.notify(
                     NOTIFICATION_ID,
                     buildNotification(phase2 = true, minLeft = 0)
@@ -156,7 +166,7 @@ class GameService : Service() {
         wakeLock = null
     }
 
-    // ── Fase 2 — reducción térmica para partidas largas ───────────────────────
+    // ── Fase 2 ───────────────────────────────────────────────────────────────
     private suspend fun applyPhase2() {
         val ok = ShizukuHelper.applyLongGameMode()
         if (ok) {
@@ -168,7 +178,7 @@ class GameService : Service() {
         }
     }
 
-    // ── Notificación ──────────────────────────────────────────────────────────
+    // ── Notificación con estado del motor inteligente ─────────────────────────
     private fun buildNotification(
         phase2: Boolean,
         minLeft: Int,
@@ -180,15 +190,16 @@ class GameService : Service() {
             PendingIntent.FLAG_IMMUTABLE
         )
 
-        val title = if (phase2)
-            "GameModeAI — Fase 2 activa"
-        else
-            "GameModeAI activo"
+        val title = when {
+            phase2      -> "GameModeAI — Fase 2 activa"
+            aotRunning  -> "GameModeAI — Compilando AOT"
+            else        -> "GameModeAI activo · $lastHealthLabel"
+        }
 
         val text = when {
             aotRunning  -> "Compilando Free Fire (AOT)… aim más estable al terminar"
-            phase2      -> "Brillo y CPU reducidos para mantener temp baja"
-            minLeft > 1 -> "Fase 2 térmica en $minLeft min · aim y rendimiento optimizados"
+            phase2      -> "Brillo y CPU reducidos · Motor: $lastHealthLabel"
+            minLeft > 1 -> "Fase 2 en $minLeft min · Motor: $lastHealthLabel"
             else        -> "Fase 2 térmica en $minLeft min · casi lista!"
         }
 
@@ -203,7 +214,7 @@ class GameService : Service() {
             .build()
     }
 
-    // ── Canal de notificación ─────────────────────────────────────────────────
+    // ── Canal ─────────────────────────────────────────────────────────────────
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
