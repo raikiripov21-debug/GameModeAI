@@ -11,19 +11,13 @@ android {
         applicationId = "com.gamemode.a06"
         minSdk = 24
         targetSdk = 35
-        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
-        versionName = (project.findProperty("versionCode") as String?)?.let { "v$it" } ?: "v1"
-        buildConfigField("String", "TARGET_DEVICE", "\"samsung_a06\"")
-        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
+        // En CI se inyecta: ./gradlew assembleRelease -PversionCode=<run_number>
+        versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 53
+        versionName = (project.findProperty("versionCode") as String?)?.let { "v$it" } ?: "v53"
     }
 
     buildTypes {
-        debug {
-            isDebuggable = true
-            isMinifyEnabled = false
-        }
         release {
-            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -44,7 +38,7 @@ android {
 
     buildFeatures {
         compose = true
-        buildConfig = true
+        buildConfig = true   // necesario para BuildConfig.VERSION_CODE en UpdateChecker
     }
 
     composeOptions {
@@ -53,31 +47,25 @@ android {
 
     packaging {
         resources {
-            excludes += listOf("/META-INF/{AL2.0,LGPL2.1}", "/META-INF/DEPENDENCIES", "/*.txt")
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
-        jniLibs { pickFirsts += listOf("**/*.so") }
-    }
-
-    lint {
-        abortOnError = false
-        checkReleaseBuilds = false
-        disable += listOf("MissingTranslation", "ExtraTranslation")
     }
 }
 
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.02.01")
     implementation(composeBom)
+
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
     implementation("androidx.activity:activity-compose:1.8.2")
+
     implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.runtime:runtime")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
-    debugImplementation("androidx.compose.ui:ui-tooling-preview")
+
     implementation("dev.rikka.shizuku:api:11.0.3")
     implementation("dev.rikka.shizuku:provider:11.0.3")
 }
