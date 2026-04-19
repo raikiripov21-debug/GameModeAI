@@ -168,6 +168,9 @@ fun GameModeScreen(
       var freeFireRunning by remember { mutableStateOf<Boolean?>(null) }
 
       var actionMessage by remember { mutableStateOf("") }
+    // OptimizerEngine motor inteligente
+    var systemSnapshot by remember { mutableStateOf(OptimizerEngine.SystemSnapshot()) }
+    var sessionAdvice by remember { mutableStateOf<String?>(null) }
 
     // Actualizacion de la app
     var updateStatus by remember { mutableStateOf("idle") }
@@ -219,6 +222,30 @@ fun GameModeScreen(
             charging   = isCharging(context)
         }
     }
+    // OptimizerEngine — snapshot cada 2 s cuando el modo juego está activo
+    LaunchedEffect(isActive) {
+        if (!isActive) {
+            systemSnapshot = OptimizerEngine.SystemSnapshot()
+            sessionAdvice  = null
+            return@LaunchedEffect
+        }
+        while (isActive) {
+            val snap = OptimizerEngine.getSnapshot(
+                ramFreeMb  = getAvailableRamMb(context),
+                ramTotalMb = getTotalRamMb(context)
+            )
+            systemSnapshot = snap
+            val startMs = Prefs.getLongGameStartMs(context)
+            if (startMs > 0L) {
+                sessionAdvice = OptimizerEngine.getSessionAdvice(
+                    sessionMs = System.currentTimeMillis() - startMs,
+                    snapshot  = snap
+                )
+            }
+            delay(2_000L)
+        }
+    }
+
 
     // Monitor continuo: FPS + CPU + temperatura + fase2 cada segundo
     LaunchedEffect(isActive) {
@@ -557,6 +584,57 @@ fun GameModeScreen(
                                     color = if (isPhase2) TealAcc else GreenBright)
                             }
                         }
+                        // OE-MONITOR
+                        run {
+                            val oeS = systemSnapshot
+                            if (oeS.cpuUsagePct > 0 || oeS.health != OptimizerEngine.SystemHealth.Stable) {
+                                HorizontalDivider(color = Color(0xFF1E1E1E))
+                                val healthColor = when (oeS.health) {
+                                    OptimizerEngine.SystemHealth.Stable      -> GreenBright
+                                    OptimizerEngine.SystemHealth.MediumLoad  -> YellowAcc
+                                    OptimizerEngine.SystemHealth.HighLoad    -> OrangeAcc
+                                    OptimizerEngine.SystemHealth.ThermalRisk -> RedBright
+                                }
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Box(Modifier.size(8.dp).clip(CircleShape).background(healthColor))
+                                        Text("Motor: " + oeS.healthLabel, fontSize = 11.sp,
+                                            color = healthColor, fontWeight = FontWeight.SemiBold)
+                                    }
+                                    if (oeS.cpuUsagePct > 0) {
+                                        val cpuColor = when {
+                                            oeS.cpuUsagePct > 80 -> RedBright
+                                            oeS.cpuUsagePct > 60 -> YellowAcc
+                                            else                   -> GreenBright
+                                        }
+                                        Text("CPU " + oeS.cpuUsagePct + "%", fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold, color = cpuColor)
+                                    }
+                                }
+                                if (oeS.cpuUsagePct > 0) {
+                                    val cpuBarColor = when {
+                                        oeS.cpuUsagePct > 80 -> RedBright
+                                        oeS.cpuUsagePct > 60 -> YellowAcc
+                                        else                   -> GreenBright
+                                    }
+                                    LinearProgressIndicator(
+                                        progress = { (oeS.cpuUsagePct / 100f).coerceIn(0f, 1f) },
+                                        modifier = Modifier.fillMaxWidth().height(4.dp)
+                                            .clip(RoundedCornerShape(2.dp)),
+                                        color = cpuBarColor,
+                                        trackColor = Color(0xFF1A1A1A)
+                                    )
+                                }
+                            }
+                        }
+
                         Text("FPS = fluidez de la interfaz · CPU alta = sin throttling = mira estable",
                             fontSize = 10.sp, color = GreyText.copy(alpha = 0.4f))
                     }
@@ -824,6 +902,47 @@ fun GameModeScreen(
                     )
                 }
             }
+
+            // OE-ADVICE
+            sessionAdvice?.let { oeAdvice ->
+                val oeHealth = systemSnapshot.health
+                val oeAdviceBg = when (oeHealth) {
+                    OptimizerEngine.SystemHealth.ThermalRisk -> Color(0xFF280000)
+                    OptimizerEngine.SystemHealth.HighLoad    -> Color(0xFF1A0A00)
+                    OptimizerEngine.SystemHealth.MediumLoad  -> Color(0xFF141400)
+                    else                                      -> Color(0xFF001810)
+                }
+                val oeAdviceColor = when (oeHealth) {
+                    OptimizerEngine.SystemHealth.ThermalRisk -> RedBright
+                    OptimizerEngine.SystemHealth.HighLoad    -> OrangeAcc
+                    OptimizerEngine.SystemHealth.MediumLoad  -> YellowAcc
+                    else                                      -> TealAcc
+                }
+                val oeIcon = when (oeHealth) {
+                    OptimizerEngine.SystemHealth.ThermalRisk -> "🔥"
+                    OptimizerEngine.SystemHealth.HighLoad    -> "⚠"
+                    else                                      -> "ℹ"
+                }
+                Box(
+                    modifier = Modifier.fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(oeAdviceBg)
+                        .padding(12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(oeIcon, fontSize = 18.sp)
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text("MOTOR INTELIGENTE", fontSize = 9.sp,
+                                color = oeAdviceColor, fontWeight = FontWeight.Bold,
+                                letterSpacing = 1.sp)
+                            Text(oeAdvice, fontSize = 11.sp,
+                                color = Color.White.copy(alpha = 0.8f))
+                        }
+                    }
+                }
+            }
+
 
             // ── Tips ──────────────────────────────────────────────────────────
             Card(modifier = Modifier.fillMaxWidth(),
