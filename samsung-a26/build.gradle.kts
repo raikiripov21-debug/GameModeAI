@@ -14,9 +14,9 @@ android {
         versionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
         versionName = (project.findProperty("versionCode") as String?)?.let { "v$it" } ?: "v1"
         buildConfigField("String", "TARGET_DEVICE", "\"samsung_a26\"")
-        buildConfigField("Int", "CPU_CORES", "8")
-        buildConfigField("Int", "MAX_RAM_MB", "6144")
-        buildConfigField("Int", "TEMP_THRESHOLD", "40")
+        buildConfigField("int", "CPU_CORES", "8")
+        buildConfigField("int", "MAX_RAM_MB", "6144")
+        buildConfigField("int", "TEMP_THRESHOLD", "40")
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
