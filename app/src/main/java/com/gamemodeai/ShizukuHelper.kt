@@ -6,10 +6,23 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import rikka.shizuku.Shizuku
 
+/**
+ * ShizukuHelper — Samsung Galaxy A06
+ *
+ * REGRAS ESTRITAS (A06):
+ * - APENAS comandos "settings put" e "cmd activity/package/power" permitidos
+ * - PROIBIDO: am force-stop, am kill-all
+ * - PROIBIDO: qualquer comando agressivo
+ * - Anti-spam interno: 11 s entre execuções de manutenção
+ */
 object ShizukuHelper {
 
     private const val TAG = "ShizukuHelper"
     private const val REQUEST_CODE = 1001
+
+    // Anti-spam: não executar manutenção mais de 1x a cada 11 s
+    private var lastMaintenanceMs: Long = 0L
+    private const val ANTI_SPAM_MS = 11_000L
 
     fun isShizukuAvailable(): Boolean {
         return try { Shizuku.pingBinder() }
@@ -29,43 +42,18 @@ object ShizukuHelper {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // MODO JUEGO — Fase 1 (al activar)
+    // MODO JOGO — Fase 1 (ao ativar)
+    // APENAS configurações seguras via "settings put" — SEM am force-stop
     // ══════════════════════════════════════════════════════════════════════════
     suspend fun enableGameMode(): Boolean = withContext(Dispatchers.IO) {
         runCommands(listOf(
 
-            // BLOQUE 1 · SAMSUNG GOS — parar el throttling de software Samsung
-            "am force-stop com.samsung.android.game.gos",
-            "am force-stop com.samsung.android.game.gamehome",
-            "am force-stop com.samsung.android.game.gametools",
+            // BLOCO 1 · SAMSUNG GOS — desativar via settings (sem force-stop)
             "settings put global game_home_enable 0",
             "settings put global game_tools_enable 0",
             "settings put global game_automatic_fps 0",
 
-            // BLOQUE 2 · SERVICIOS SAMSUNG — parar los que consumen CPU/RAM en idle
-            "am force-stop com.samsung.android.bixby.agent",
-            "am force-stop com.samsung.android.bixby.service",
-            "am force-stop com.samsung.android.app.camera",
-            "am force-stop com.samsung.android.galaxyapps",
-            "am force-stop com.sec.android.daemonapp",
-            "am force-stop com.samsung.android.sm.policy",
-            "am force-stop com.samsung.android.sm",
-            "am force-stop com.samsung.android.lool",
-            "am force-stop com.samsung.android.sdhms",
-            "am force-stop com.samsung.android.app.updatecenter",
-            "am force-stop com.samsung.android.app.samsungbluetoothdevicemanager",
-            "am force-stop com.samsung.android.app.galaxyfinder",
-            // Digital Wellbeing — consume CPU monitoreando el uso del teléfono
-            "am force-stop com.samsung.android.forest",
-            "am force-stop com.samsung.android.wellbeing",
-            // Wi-Fi Aware — protocolo P2P de Samsung, inútil durante gaming
-            "am force-stop com.samsung.android.aware.service",
-            // Samsung Pay Frame — no se usa durante el juego
-            "am force-stop com.samsung.android.spayfw",
-            // Samsung Location sensor DB — actualiza DB de localización en background
-            "am force-stop com.samsung.android.location.sensordatabaseprovider",
-
-            // BLOQUE 3 · ANTI-CALENTAMIENTO FASE 1
+            // BLOCO 2 · ANTI-AQUECIMENTO FASE 1
             "settings put global nfc_on 0",
             "settings put system screen_brightness 115",
             "settings put system screen_brightness_mode 0",
@@ -77,7 +65,7 @@ object ShizukuHelper {
             "settings put system accelerometer_rotation 0",
             "settings put global sync_disabled 1",
 
-            // BLOQUE 4 · RENDIMIENTO CPU (Exynos 850)
+            // BLOCO 3 · DESEMPENHO CPU (Exynos 850)
             "cmd power set-mode 2",
             "settings put global sem_enhanced_cpu_responsiveness 1",
             "settings put global adaptive_battery_management_enabled 0",
@@ -87,7 +75,7 @@ object ShizukuHelper {
             "settings put global app_standby_enabled 0",
             "settings put global enable_freeform_support 0",
 
-            // BLOQUE 5 · PANTALLA — 60 Hz fijo (LCD A06 no tiene AMOLED)
+            // BLOCO 4 · TELA — 60 Hz fixo (LCD A06)
             "settings put global window_animation_scale 0",
             "settings put global transition_animation_scale 0",
             "settings put global animator_duration_scale 0",
@@ -97,43 +85,40 @@ object ShizukuHelper {
             "settings put secure accessibility_display_daltonizer_enabled 0",
             "settings put system screen_off_timeout 1800000",
 
-            // BLOQUE 6 · GPU — Vulkan optimizado para Exynos 850
+            // BLOCO 5 · GPU — Vulkan para Exynos 850
             "settings put global gpu_debug_layers_enable 0",
             "settings put global enable_gpu_debug_layers 0",
             "settings put global skia_use_vulkan_for_android 1",
             "settings put global enable_vulkan_validation_layers 0",
 
-            // BLOQUE 7 · AIM / TOUCH — precisión máxima del A06
-            // Táctil sin filtros: desactiva todo suavizado y predicción para respuesta raw
+            // BLOCO 6 · AIM / TOUCH — precisão máxima A06
             "settings put system haptic_feedback_enabled 0",
             "settings put system sound_effects_enabled 0",
             "settings put system pointer_speed 1",
             "settings put system pointer_location 0",
             "settings put system show_touches 0",
-            "settings put system touch_sensitivity_mode 1",  // alta sensibilidad: LCD A06 sin protector
-            "settings put system touch_blocking_period 0",   // sin bloqueo entre eventos táctiles
-            "settings put system touch_debounce_period 0",   // sin debounce → cada toque cuenta
+            "settings put system touch_sensitivity_mode 1",
+            "settings put system touch_blocking_period 0",
+            "settings put system touch_debounce_period 0",
             "settings put system touch_event_blocking_period 0",
-            "settings put system touch_smooth_mode 0",       // sin suavizado: posición exacta del dedo
+            "settings put system touch_smooth_mode 0",
             "settings put system touch_sensitivity_auto_adjust 0",
             "settings put secure touch_exploration_enabled 0",
             "settings put secure accessibility_display_magnification_enabled 0",
             "settings put secure spell_checker_enabled 0",
-            // Tiempo de respuesta táctil: long-press y doble toque más rápidos
-            "settings put system long_press_timeout 300",    // 400ms→300ms: gestos más reactivos
-            "settings put system multi_press_timeout 300",   // doble toque reconocido 100ms antes
-            // Asistente virtual: desactivar completamente para que no robe toques
+            "settings put system long_press_timeout 300",
+            "settings put system multi_press_timeout 300",
             "settings put secure assist_gesture_enabled 0",
             "settings put secure assist_gesture_wake 0",
-            "settings put secure double_tap_to_wake 0",      // evita despertar accidental al rozar pantalla
+            "settings put secure double_tap_to_wake 0",
 
-            // BLOQUE 8 · GESTOS SAMSUNG — eliminar toda interferencia durante el juego
+            // BLOCO 7 · GESTOS SAMSUNG — sem interferência durante o jogo
             "settings put system edge_panels_enabled 0",
             "settings put system edge_typing_enabled 0",
             "settings put system edge_lighting_enabled 0",
             "settings put system one_handed_mode_enabled 0",
             "settings put system one_handed_mode_trigger 0",
-            "settings put system swipe_up_to_switch_apps_enabled 0", // sin cambio accidental de app
+            "settings put system swipe_up_to_switch_apps_enabled 0",
             "settings put secure camera_double_tap_power_key_gesture_disabled 1",
             "settings put secure assistant_gesture_triggered 1",
             "settings put secure navigation_mode 0",
@@ -144,24 +129,22 @@ object ShizukuHelper {
             "settings put global device_idle_constants min_time_to_alarm=3600000",
             "settings put global wifi_watchdog_on 0",
 
-            // BLOQUE 9 · SAMSUNG SECURITY ENGINE — reduce picos de CPU inesperados
-            // El motor de seguridad de Samsung hace análisis en background y causa microfreezes
+            // BLOCO 8 · SAMSUNG SECURITY ENGINE — reduz picos de CPU
             "settings put global sem_mobile_security_engine 0",
-            "settings put global game_mode_intervention 0",  // Samsung GOS no puede intervenir
-            "settings put secure screensaver_enabled 0",     // sin Daydream que despierte la GPU
-            "settings put global network_scoring_ui_enabled 0", // scoring de red: análisis innecesario
+            "settings put global game_mode_intervention 0",
+            "settings put secure screensaver_enabled 0",
+            "settings put global network_scoring_ui_enabled 0",
 
-            // BLOQUE 10 · PROCESO — Free Fire con máxima prioridad
+            // BLOCO 9 · PROCESSO — Free Fire com máxima prioridade (seguro)
             "cmd activity set-standby-bucket com.dts.freefireth active",
             "cmd activity set-standby-bucket com.dts.freefiremaxob active",
 
-            // BLOQUE 10 · MEMORIA — límite de fondo + freeze de apps inactivas
-            "am kill-all",
+            // BLOCO 10 · MEMÓRIA — limites suaves (SEM am kill-all)
             "settings put global always_finish_activities 0",
             "settings put global background_process_limit 2",
             "settings put global cached_apps_freezer enabled",
 
-            // BLOQUE 11 · RED — WiFi estable sin interrupciones durante la partida
+            // BLOCO 11 · REDE — WiFi estável sem interrupções
             "settings put global wifi_sleep_policy 2",
             "settings put global mobile_data_always_on 1",
             "settings put global captive_portal_detection_enabled 0",
@@ -170,42 +153,42 @@ object ShizukuHelper {
             "settings put global wifi_connected_mac_randomization_enabled 0",
             "settings put global network_recommendations_enabled 0",
             "settings put global wifi_enhanced_auto_join 0",
-            // WiFi anti power-save: previene saltos de ping de ~100 ms al entrar en ahorro WiFi
             "settings put global wifi_suspend_optimizations_enabled 0",
-
-            // BLOQUE 11B · vsync-CPU: el Exynos 850 frena el CPU durante vsync por defecto,
-            // causando micro-stutters en el momento exacto en que el aim necesita respuesta rápida
             "settings put global vsync_for_cpu_throttle 0",
 
-            // BLOQUE 12 · LIMPIEZA FINAL
+            // BLOCO 12 · LIMPEZA FINAL (settings apenas)
             "settings put global auto_time 0",
             "settings put global heads_up_notifications_enabled 0",
             "settings put system notification_bubbles 0",
-            "settings put global fstrim_mandatory_interval 86400000",
-            "am kill-all"
+            "settings put global fstrim_mandatory_interval 86400000"
         ))
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    // MANUTENÇÃO — reconfirmar settings (SEM am force-stop, SEM am kill-all)
+    // Anti-spam integrado: máximo 1x a cada 11 s
+    // ══════════════════════════════════════════════════════════════════════════
     suspend fun applyMaintenanceMode(): Boolean = withContext(Dispatchers.IO) {
-        runCommands(listOf(
-            // Reiniciar servicios que se auto-levantan
-            "am force-stop com.samsung.android.game.gos",
-            "am force-stop com.samsung.android.game.gamehome",
-            "am force-stop com.samsung.android.bixby.agent",
-            "am force-stop com.samsung.android.bixby.service",
-            "am force-stop com.samsung.android.forest",
-            "am force-stop com.samsung.android.wellbeing",
-            // Prioridad Free Fire
+        val now = System.currentTimeMillis()
+        if (now - lastMaintenanceMs < ANTI_SPAM_MS) {
+            Log.d(TAG, "applyMaintenanceMode: anti-spam skip (${now - lastMaintenanceMs}ms)")
+            return@withContext false
+        }
+        val ok = runCommands(listOf(
+            // Reconfirmar GOS desativado
+            "settings put global game_home_enable 0",
+            "settings put global game_tools_enable 0",
+            // Prioridade Free Fire
             "cmd activity set-standby-bucket com.dts.freefireth active",
             "cmd activity set-standby-bucket com.dts.freefiremaxob active",
-            // Animaciones y red
+            // Animações e rede
             "settings put global window_animation_scale 0",
             "settings put global transition_animation_scale 0",
             "settings put global animator_duration_scale 0",
             "settings put global wifi_scan_always_enabled 0",
             "settings put global sync_disabled 1",
             "settings put global nfc_on 0",
-            // AIM — re-confirmar cada 5 min (algunos servicios Samsung los revierten)
+            // AIM — reconfirmar (alguns serviços Samsung revertem)
             "settings put system haptic_feedback_enabled 0",
             "settings put system sound_effects_enabled 0",
             "settings put system touch_sensitivity_mode 1",
@@ -216,64 +199,47 @@ object ShizukuHelper {
             "settings put secure assist_gesture_enabled 0",
             "settings put global sem_mobile_security_engine 0",
             "settings put global game_mode_intervention 0",
-            // Notificaciones y memoria
+            // Notificações e memória
             "settings put global heads_up_notifications_enabled 0",
             "settings put global background_process_limit 2",
             "settings put global wifi_connected_mac_randomization_enabled 0",
             "settings put global network_recommendations_enabled 0"
         ))
+        if (ok) lastMaintenanceMs = now
+        ok
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // FASE 2 — Partida larga (20 minutos después de activar)
-    // Reducción térmica adicional para partidas largas en el A06.
+    // FASE 2 — Partida longa (20 min após ativar)
+    // Redução térmica adicional — SEM am force-stop, SEM am kill-all
     // ══════════════════════════════════════════════════════════════════════════
     suspend fun applyLongGameMode(): Boolean = withContext(Dispatchers.IO) {
         runCommands(listOf(
-
-            // Brillo baja de 115 → 75 (29 %) — el panel LCD es la mayor fuente de calor
+            // Brilho mais baixo para reduzir calor (LCD é maior fonte de calor)
             "settings put system screen_brightness 75",
-
-            // Matar todo lo que haya vuelto a levantarse en 20 min
-            "am force-stop com.samsung.android.game.gos",
-            "am force-stop com.samsung.android.bixby.agent",
-            "am force-stop com.samsung.android.bixby.service",
-            "am force-stop com.samsung.android.app.camera",
-            "am force-stop com.samsung.android.galaxyapps",
-            "am force-stop com.sec.android.daemonapp",
-            "am force-stop com.samsung.android.sm",
-            "am force-stop com.samsung.android.lool",
-            "am force-stop com.samsung.android.app.galaxyfinder",
-
-            // Reducir al mínimo estable los procesos de fondo
-            "settings put global background_process_limit 1",
-
-            // Segunda limpieza de RAM
-            "am kill-all",
-
-            // Confirmar configuraciones críticas aún activas
+            // Confirmar configurações críticas
             "settings put global wifi_scan_always_enabled 0",
             "settings put global sync_disabled 1",
             "settings put secure location_mode 0",
             "settings put global nfc_on 0",
             "settings put global wifi_connected_mac_randomization_enabled 0",
             "settings put global network_recommendations_enabled 0",
-
-            // Prioridad máxima de proceso para Free Fire
+            // Reduzir processos em background (limite seguro)
+            "settings put global background_process_limit 1",
+            // Prioridade máxima para Free Fire
             "cmd activity set-standby-bucket com.dts.freefireth active",
-            "cmd activity set-standby-bucket com.dts.freefiremaxob active",
-
-            // Tercer kill-all para asegurar que nada compite con Free Fire
-            "am kill-all"
+            "cmd activity set-standby-bucket com.dts.freefiremaxob active"
         ))
     }
 
     suspend fun applyLongGameMaintenance(): Boolean = withContext(Dispatchers.IO) {
-        runCommands(listOf(
+        val now = System.currentTimeMillis()
+        if (now - lastMaintenanceMs < ANTI_SPAM_MS) {
+            Log.d(TAG, "applyLongGameMaintenance: anti-spam skip")
+            return@withContext false
+        }
+        val ok = runCommands(listOf(
             "settings put system screen_brightness 75",
-            "am force-stop com.samsung.android.game.gos",
-            "am force-stop com.samsung.android.bixby.agent",
-            "am force-stop com.samsung.android.bixby.service",
             "cmd activity set-standby-bucket com.dts.freefireth active",
             "cmd activity set-standby-bucket com.dts.freefiremaxob active",
             "settings put global background_process_limit 1",
@@ -287,42 +253,41 @@ object ShizukuHelper {
             "settings put global wifi_connected_mac_randomization_enabled 0",
             "settings put global network_recommendations_enabled 0"
         ))
+        if (ok) lastMaintenanceMs = now
+        ok
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // DESACTIVAR MODO JUEGO — restaurar TODOS los ajustes modificados
+    // DESATIVAR MODO JOGO — restaurar todos os ajustes
     // ══════════════════════════════════════════════════════════════════════════
     suspend fun disableGameMode(): Boolean = withContext(Dispatchers.IO) {
+        lastMaintenanceMs = 0L
         runCommands(listOf(
-            // Animaciones
+            // Animações
             "settings put global window_animation_scale 1",
             "settings put global transition_animation_scale 1",
             "settings put global animator_duration_scale 1",
-
-            // CPU / batería
+            // CPU / bateria
             "cmd power set-mode 0",
             "settings put global sem_enhanced_cpu_responsiveness 0",
             "settings put global adaptive_battery_management_enabled 1",
             "settings put global automatic_power_save_mode 1",
             "settings put global app_standby_enabled 1",
             "settings put global enable_freeform_support 0",
-
-            // Pantalla
+            // Tela
             "settings put global nfc_on 1",
             "settings put system screen_brightness_mode 1",
             "settings put global always_on_display_enabled 1",
             "settings put system accelerometer_rotation 1",
-            "settings put system screen_off_timeout 300000",    // 5 min (era 30 min)
+            "settings put system screen_off_timeout 300000",
             "settings put global bluetooth_scan_mode 23",
-
             // GPU
             "settings put global gpu_debug_layers_enable 0",
             "settings put global skia_use_vulkan_for_android 0",
-
-            // Touch / puntero — restaurar los que se cambiaron
+            // Touch — restaurar
             "settings put system haptic_feedback_enabled 1",
             "settings put system sound_effects_enabled 1",
-            "settings put system pointer_speed 0",              // restaurar velocidad por defecto
+            "settings put system pointer_speed 0",
             "settings put system touch_sensitivity_mode 0",
             "settings put system touch_blocking_period 100",
             "settings put system touch_debounce_period 50",
@@ -332,15 +297,12 @@ object ShizukuHelper {
             "settings put system accidental_touch_protection 1",
             "settings put secure touch_exploration_enabled 0",
             "settings put secure spell_checker_enabled 1",
-            // Restaurar tiempos de toque
             "settings put system long_press_timeout 400",
             "settings put system multi_press_timeout 400",
-            // Restaurar asistente virtual
             "settings put secure assist_gesture_enabled 1",
             "settings put secure assist_gesture_wake 1",
             "settings put secure double_tap_to_wake 1",
-
-            // Paneles Samsung — restaurar panel lateral y tipeo lateral
+            // Painéis Samsung
             "settings put system edge_panels_enabled 1",
             "settings put system edge_lighting_enabled 1",
             "settings put system edge_typing_enabled 1",
@@ -355,25 +317,21 @@ object ShizukuHelper {
             "settings put system prevent_accidental_touch 1",
             "settings put global wifi_watchdog_on 1",
             "settings put global device_idle_constants \"\"",
-            // Restaurar Samsung Security Engine
+            // Samsung Security Engine — restaurar
             "settings put global sem_mobile_security_engine 1",
             "settings put global game_mode_intervention 1",
             "settings put global network_scoring_ui_enabled 1",
-
-            // Notificaciones
+            // Notificações
             "settings put system notification_bubbles 1",
             "settings put global heads_up_notifications_enabled 1",
-
-            // Proceso — Free Fire vuelve a prioridad normal
+            // Free Fire — prioridade normal
             "cmd activity set-standby-bucket com.dts.freefireth working_set",
             "cmd activity set-standby-bucket com.dts.freefiremaxob working_set",
-
-            // Memoria
+            // Memória
             "settings put global always_finish_activities 0",
             "settings put global background_process_limit -1",
             "settings put global cached_apps_freezer disabled",
-
-            // Red — restaurar WiFi y datos normales
+            // Rede — restaurar
             "settings put global wifi_scan_always_enabled 1",
             "settings put global captive_portal_detection_enabled 1",
             "settings put global nsd_on 1",
@@ -392,30 +350,20 @@ object ShizukuHelper {
     }
 
     // ══════════════════════════════════════════════════════════════════════════
-    // AOT — Compilación Ahead-of-Time de Free Fire en modo "speed"
-    //
-    // Por defecto ART compila el código de Free Fire sobre la marcha (JIT) mientras
-    // juegas. Cada vez que entra código nuevo al CPU hay un pico de ~5-15 ms.
-    // Con AOT en modo "speed" TODO el código queda en ARM nativo ANTES de entrar al
-    // juego → sin picos JIT → frames más constantes → aim más estable.
-    //
-    // Primera ejecución: ~30-90 s (compila ~500 MB de DEX).
-    // Ejecuciones posteriores: <2 s (ya compilado, no hace nada).
+    // AOT — Compilação Ahead-of-Time do Free Fire
     // ══════════════════════════════════════════════════════════════════════════
     suspend fun optimizeFreeFireAOT(): Boolean = withContext(Dispatchers.IO) {
-        Log.d(TAG, "AOT: iniciando compilación speed de Free Fire…")
+        Log.d(TAG, "AOT: iniciando compilação speed do Free Fire…")
         val ok = runCommands(listOf(
             "cmd package compile -m speed com.dts.freefireth",
             "cmd package compile -m speed com.dts.freefiremaxob"
         ))
-        Log.d(TAG, if (ok) "AOT: compilación completada" else "AOT: falló o Shizuku no disponible")
+        Log.d(TAG, if (ok) "AOT: compilação concluída" else "AOT: falhou ou Shizuku indisponível")
         ok
     }
 
     /**
-     * Detecta si Free Fire (normal o MAX) está en los procesos activos.
-     * Usa dumpsys en un solo proceso sh para no saturar la CPU.
-     * Devuelve false si Shizuku no está disponible.
+     * Detecta se o Free Fire (normal ou MAX) está entre os processos ativos.
      */
     suspend fun isFreeFireRunning(): Boolean = withContext(Dispatchers.IO) {
         if (!isShizukuAvailable() || !hasPermission()) return@withContext false
@@ -435,20 +383,14 @@ object ShizukuHelper {
         }
     }
 
-    /** Ejecuta un único comando shell via Shizuku. Para uso externo (ej. botón Limpiar RAM). */
+    /** Executa um único comando shell via Shizuku. */
     suspend fun run(cmd: String): Boolean = withContext(Dispatchers.IO) {
         runCommands(listOf(cmd))
     }
 
     /**
-     * Ejecuta todos los comandos en UN SOLO proceso de shell.
-     *
-     * Antes: 50+ procesos individuales (sh -c cmd) → activación lenta (10-15 s).
-     * Ahora: 1 proceso con todos los comandos separados por ' ; ' → 1-2 s.
-     *
-     * Los comandos que fallen (exit ≠ 0, p.ej. una app no instalada) no detienen
-     * los siguientes gracias al operador ';'. El exit code final es el del último
-     * comando (am kill-all), que siempre devuelve 0.
+     * Executa todos os comandos em UM ÚNICO processo de shell.
+     * Comandos separados por ';' — falhas individuais não param os próximos.
      */
     private fun runCommands(commands: List<String>): Boolean {
         if (!isShizukuAvailable()) { Log.w(TAG, "Shizuku not available"); return false }
@@ -456,12 +398,12 @@ object ShizukuHelper {
         if (commands.isEmpty()) return true
         val script = commands.joinToString(" ; ")
         return try {
-            Log.d(TAG, "runCommands: ${commands.size} cmds en 1 proceso")
+            Log.d(TAG, "runCommands: ${commands.size} cmds em 1 processo")
             val p = Shizuku.newProcess(arrayOf("sh", "-c", script), null, null)
             val exit = p.waitFor()
             p.destroy()
             if (exit != 0) Log.w(TAG, "Script exit=$exit (${commands.size} cmds)")
-            true   // true aunque algún comando individual falle; no son críticos
+            true
         } catch (e: Exception) {
             Log.e(TAG, "runCommands exception: ${e.message}")
             false
