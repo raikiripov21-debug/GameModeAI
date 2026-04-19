@@ -20,6 +20,10 @@ permissions:
   contents: write
 
 jobs:
+
+  # ─────────────────────────────────────────────
+  # APP 1: Samsung Galaxy A06 — com.gamemode.a06
+  # ─────────────────────────────────────────────
   build-samsung-a06:
     name: 'Build APK — Samsung Galaxy A06'
     runs-on: ubuntu-latest
@@ -27,64 +31,55 @@ jobs:
     if: ${{ github.event.inputs.device == 'all' || github.event.inputs.device == 'samsung-a06' || github.event_name == 'push' }}
 
     steps:
-      - name: Checkout código
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configurar JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: gradle
 
-      - name: Cache Gradle (A06)
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-a06-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-a06-${{ hashFiles('**/*.gradle*', '**/*.gradle.kts', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-a06-
             ${{ runner.os }}-gradle-
 
-      - name: Permisos Gradle wrapper
+      - name: Permisos Gradle
         run: chmod +x gradlew
 
-      - name: Compilar APK Debug (A06)
-        run: |
-          ./gradlew assembleDebug \
-            -PversionCode=${{ github.run_number }} \
-            -PdeviceTarget=samsung-a06 \
-            --no-daemon \
-            --build-cache \
-            --stacktrace
+      - name: Build APK Debug — A06 (com.gamemode.a06)
+        run: ./gradlew :app:assembleDebug -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
 
-      - name: Subir APK Debug (A06)
-        uses: actions/upload-artifact@v4
+      - name: Verificar APK generado
+        run: |
+          echo "=== APK Samsung A06 ==="
+          find app/build/outputs/apk/debug -name "*.apk" -exec ls -lh {} \;
+
+      - uses: actions/upload-artifact@v4
         with:
           name: GameModeAI-SamsungA06-debug-${{ github.run_number }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: app/build/outputs/apk/debug/*.apk
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
 
-      - name: Compilar APK Release (A06)
-        run: |
-          ./gradlew assembleRelease \
-            -PversionCode=${{ github.run_number }} \
-            -PdeviceTarget=samsung-a06 \
-            --no-daemon \
-            --build-cache \
-            --stacktrace
+      - name: Build APK Release — A06
+        run: ./gradlew :app:assembleRelease -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
 
-      - name: Subir APK Release (A06)
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: GameModeAI-SamsungA06-release-${{ github.run_number }}
           path: app/build/outputs/apk/release/*.apk
           retention-days: 30
           if-no-files-found: warn
 
+  # ─────────────────────────────────────────────
+  # APP 2: Samsung Galaxy A26 — com.gamemode.a26
+  # ─────────────────────────────────────────────
   build-samsung-a26:
     name: 'Build APK — Samsung Galaxy A26'
     runs-on: ubuntu-latest
@@ -92,64 +87,55 @@ jobs:
     if: ${{ github.event.inputs.device == 'all' || github.event.inputs.device == 'samsung-a26' || github.event_name == 'push' }}
 
     steps:
-      - name: Checkout código
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configurar JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: gradle
 
-      - name: Cache Gradle (A26)
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-a26-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-a26-${{ hashFiles('**/*.gradle*', '**/*.gradle.kts', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-a26-
             ${{ runner.os }}-gradle-
 
-      - name: Permisos Gradle wrapper
+      - name: Permisos Gradle
         run: chmod +x gradlew
 
-      - name: Compilar APK Debug (A26)
-        run: |
-          ./gradlew assembleDebug \
-            -PversionCode=${{ github.run_number }} \
-            -PdeviceTarget=samsung-a26 \
-            --no-daemon \
-            --build-cache \
-            --stacktrace
+      - name: Build APK Debug — A26 (com.gamemode.a26)
+        run: ./gradlew :samsung-a26:assembleDebug -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
 
-      - name: Subir APK Debug (A26)
-        uses: actions/upload-artifact@v4
+      - name: Verificar APK generado
+        run: |
+          echo "=== APK Samsung A26 ==="
+          find samsung-a26/build/outputs/apk/debug -name "*.apk" -exec ls -lh {} \;
+
+      - uses: actions/upload-artifact@v4
         with:
           name: GameModeAI-SamsungA26-debug-${{ github.run_number }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: samsung-a26/build/outputs/apk/debug/*.apk
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
 
-      - name: Compilar APK Release (A26)
-        run: |
-          ./gradlew assembleRelease \
-            -PversionCode=${{ github.run_number }} \
-            -PdeviceTarget=samsung-a26 \
-            --no-daemon \
-            --build-cache \
-            --stacktrace
+      - name: Build APK Release — A26
+        run: ./gradlew :samsung-a26:assembleRelease -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
 
-      - name: Subir APK Release (A26)
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: GameModeAI-SamsungA26-release-${{ github.run_number }}
-          path: app/build/outputs/apk/release/*.apk
+          path: samsung-a26/build/outputs/apk/release/*.apk
           retention-days: 30
           if-no-files-found: warn
 
+  # ─────────────────────────────────────────────
+  # APP 3: Motorola Moto G04s — com.gamemode.moto
+  # ─────────────────────────────────────────────
   build-moto-g04s:
     name: 'Build APK — Motorola Moto G04s'
     runs-on: ubuntu-latest
@@ -157,60 +143,48 @@ jobs:
     if: ${{ github.event.inputs.device == 'all' || github.event.inputs.device == 'moto-g04s' || github.event_name == 'push' }}
 
     steps:
-      - name: Checkout código
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configurar JDK 17
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: gradle
 
-      - name: Cache Gradle (G04s)
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: ${{ runner.os }}-gradle-g04s-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: ${{ runner.os }}-gradle-g04s-${{ hashFiles('**/*.gradle*', '**/*.gradle.kts', '**/gradle-wrapper.properties') }}
           restore-keys: |
             ${{ runner.os }}-gradle-g04s-
             ${{ runner.os }}-gradle-
 
-      - name: Permisos Gradle wrapper
+      - name: Permisos Gradle
         run: chmod +x gradlew
 
-      - name: Compilar APK Debug (G04s)
-        run: |
-          ./gradlew assembleDebug \
-            -PversionCode=${{ github.run_number }} \
-            -PdeviceTarget=moto-g04s \
-            --no-daemon \
-            --build-cache \
-            --stacktrace
+      - name: Build APK Debug — Moto G04s (com.gamemode.moto)
+        run: ./gradlew :moto-g04s:assembleDebug -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
 
-      - name: Subir APK Debug (G04s)
-        uses: actions/upload-artifact@v4
+      - name: Verificar APK generado
+        run: |
+          echo "=== APK Moto G04s ==="
+          find moto-g04s/build/outputs/apk/debug -name "*.apk" -exec ls -lh {} \;
+
+      - uses: actions/upload-artifact@v4
         with:
           name: GameModeAI-MotoG04s-debug-${{ github.run_number }}
-          path: app/build/outputs/apk/debug/app-debug.apk
+          path: moto-g04s/build/outputs/apk/debug/*.apk
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
 
-      - name: Compilar APK Release (G04s)
-        run: |
-          ./gradlew assembleRelease \
-            -PversionCode=${{ github.run_number }} \
-            -PdeviceTarget=moto-g04s \
-            --no-daemon \
-            --build-cache \
-            --stacktrace
+      - name: Build APK Release — Moto G04s
+        run: ./gradlew :moto-g04s:assembleRelease -PversionCode=${{ github.run_number }} --no-daemon --stacktrace
 
-      - name: Subir APK Release (G04s)
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: GameModeAI-MotoG04s-release-${{ github.run_number }}
-          path: app/build/outputs/apk/release/*.apk
+          path: moto-g04s/build/outputs/apk/release/*.apk
           retention-days: 30
           if-no-files-found: warn
