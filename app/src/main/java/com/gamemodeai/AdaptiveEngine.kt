@@ -135,6 +135,7 @@ object AdaptiveEngine {
             else                                           -> 3
         }
 
+        AimStabilizer.updateFromScore(stabilityScore)
         return AdaptiveDecision(
             recommendedDelayMs   = currentDelayMs,
             shouldRunMaintenance = learningState != LearningState.THERMAL_CAUTION,
