@@ -1,112 +1,178 @@
 package com.gamemodeai
 
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.sign
-import kotlin.math.sqrt
 
 /**
- * AimStabilizer — Samsung Galaxy A06
+ * AimStabilizer v2 — Samsung Galaxy A06
  *
- * Elimina la "mira bipolar": oscilaciones bruscas en el delta de toque/giroscopio.
+ * Capas de estabilización (de más rápida a más lenta):
  *
- * Técnicas usadas:
- *  1. EMA (Exponential Moving Average) — suaviza la señal sin agregar lag perceptible.
- *  2. Zona muerta dinámica — descarta micro-movimientos por debajo del umbral.
- *  3. Detector de ráfaga de jitter — si el delta alterna signo rápidamente, incrementa
- *     temporalmente el suavizado para calmar la señal.
- *  4. Adaptación desde AdaptiveEngine — cuando el sistema está bajo carga, aplica más
- *     suavizado para compensar los frames perdidos.
+ *  1. ZONA MUERTA ADAPTATIVA
+ *     Ignora movimientos por debajo del umbral. El umbral sube
+ *     automáticamente cuando el sistema está bajo carga para compensar
+ *     el jitter causado por frame drops.
+ *
+ *  2. EMA (Exponential Moving Average)
+ *     Suaviza el delta frame a frame sin agregar latencia perceptible.
+ *     Alpha se adapta al score del sistema: sistema libre → más responsivo;
+ *     sistema cargado → más suavizado.
+ *
+ *  3. PREDICCIÓN DE VELOCIDAD
+ *     Mezcla el delta crudo con la velocidad estimada del frame anterior
+ *     para anticipar la dirección y evitar saltos bruscos al cambiar de
+ *     dirección.
+ *
+ *  4. DETECTOR DE RÁFAGA DE JITTER
+ *     Si el signo del delta alterna ≥3 veces consecutivas en cualquier
+ *     eje, activa "modo calma": reduce el alpha temporalmente para amortiguar
+ *     la oscilación.
+ *
+ *  5. AIM LOCK SUAVE (anti-drift)
+ *     Si la magnitud del delta lleva ≥5 frames por debajo del umbral de
+ *     quietud, el estabilizador congela la salida en (0,0) y aplica
+ *     fricción creciente para frenar la deriva residual.
+ *     Se desactiva inmediatamente al detectar movimiento intencional.
  */
 object AimStabilizer {
 
-    // ── Parámetros base ───────────────────────────────────────────────────
-    private const val DEAD_ZONE_DP     = 0.3f   // movimientos < esto se ignoran
-    private const val ALPHA_MIN        = 0.20f  // alpha bajo = muy suave (sistema cargado)
-    private const val ALPHA_MAX        = 0.80f  // alpha alto = muy responsivo (sistema libre)
-    private const val JITTER_THRESHOLD = 3      // ráfagas antes de activar modo anti-jitter
-    private const val JITTER_BOOST_DEC = 0.08f  // reducción de alpha por ráfaga
+    // ────────────────────────────────────────────────────────────────────
+    // Parámetros base — A06
+    // ────────────────────────────────────────────────────────────────────
+    private const val DEAD_ZONE_BASE    = 0.30f  // dp de zona muerta en reposo
+    private const val DEAD_ZONE_LOADED  = 0.55f  // dp bajo carga alta (score < 40)
+    private const val ALPHA_MIN         = 0.20f
+    private const val ALPHA_MAX         = 0.80f
+    private const val VELOCITY_MIX      = 0.30f  // peso de la velocidad previa en la predicción
+    private const val JITTER_THRESHOLD  = 3      // alternaciones de signo para activar calma
+    private const val JITTER_ALPHA_DEC  = 0.08f  // reducción de alpha en modo calma
+    private const val JITTER_TICKS      = 8      // ciclos de modo calma
+    private const val STILL_THRESHOLD   = 0.18f  // magnitud por debajo de la cual = quieto
+    private const val STILL_FRAMES_LOCK = 5      // frames quieto antes de aim lock
+    private const val LOCK_FRICTION     = 0.85f  // coeficiente de fricción durante lock
 
-    // ── Estado interno ────────────────────────────────────────────────────
-    private var smoothedX = 0f
-    private var smoothedY = 0f
-    private var alpha = 0.55f          // valor inicial equilibrado
+    // ────────────────────────────────────────────────────────────────────
+    // Estado interno
+    // ────────────────────────────────────────────────────────────────────
+    private var smoothedX   = 0f
+    private var smoothedY   = 0f
+    private var velocityX   = 0f
+    private var velocityY   = 0f
+    private var alpha       = 0.55f
+    private var systemScore = 55
 
-    private var prevSignX = 0f
-    private var prevSignY = 0f
-    private var jitterCountX = 0
-    private var jitterCountY = 0
-    private var jitterBoostActive = false
-    private var jitterBoostTicks = 0
+    // Jitter
+    private var prevSignX    = 0f
+    private var prevSignY    = 0f
+    private var jitterCntX   = 0
+    private var jitterCntY   = 0
+    private var jitterActive = false
+    private var jitterTicks  = 0
 
-    // ── API pública ───────────────────────────────────────────────────────
+    // Aim lock suave
+    private var stillFrames  = 0
+    private var lockActive   = false
+
+    // ────────────────────────────────────────────────────────────────────
+    // API pública
+    // ────────────────────────────────────────────────────────────────────
 
     /**
-     * Llama esto desde tu InputDispatcher o GestureListener con el delta
-     * crudo de cada frame. Devuelve el delta estabilizado listo para aplicar.
-     *
-     * @param rawDx delta crudo en X (píxeles o unidades de giroscopio)
-     * @param rawDy delta crudo en Y
-     * @return Pair(dx_estabilizado, dy_estabilizado)
+     * Procesa el delta crudo de cada frame y devuelve el delta estabilizado.
+     * Llamar desde el InputDispatcher / GestureListener / GyroHandler.
      */
     fun smooth(rawDx: Float, rawDy: Float): Pair<Float, Float> {
-        val effectiveAlpha = computeEffectiveAlpha(rawDx, rawDy)
+        val dz       = dynamicDeadZone()
+        val filtX    = applyDeadZone(rawDx, dz)
+        val filtY    = applyDeadZone(rawDy, dz)
+        val mag      = hypot(filtX, filtY)
 
-        val filteredX = applyDeadZone(rawDx)
-        val filteredY = applyDeadZone(rawDy)
+        // ── Aim lock suave ──────────────────────────────────────────────
+        if (mag < STILL_THRESHOLD) {
+            stillFrames++
+            if (stillFrames >= STILL_FRAMES_LOCK) {
+                lockActive  = true
+                smoothedX  *= LOCK_FRICTION
+                smoothedY  *= LOCK_FRICTION
+                velocityX  *= LOCK_FRICTION
+                velocityY  *= LOCK_FRICTION
+                return Pair(smoothedX, smoothedY)
+            }
+        } else {
+            stillFrames = 0
+            lockActive  = false
+        }
 
-        smoothedX = effectiveAlpha * filteredX + (1f - effectiveAlpha) * smoothedX
-        smoothedY = effectiveAlpha * filteredY + (1f - effectiveAlpha) * smoothedY
+        // ── Predicción de velocidad ─────────────────────────────────────
+        val predX = filtX + VELOCITY_MIX * velocityX
+        val predY = filtY + VELOCITY_MIX * velocityY
+
+        // ── EMA con alpha adaptativo ────────────────────────────────────
+        val eff = effectiveAlpha(rawDx, rawDy)
+        smoothedX = eff * predX + (1f - eff) * smoothedX
+        smoothedY = eff * predY + (1f - eff) * smoothedY
+
+        // Actualizar velocidad estimada
+        velocityX = smoothedX - predX * (1f - eff)
+        velocityY = smoothedY - predY * (1f - eff)
 
         return Pair(smoothedX, smoothedY)
     }
 
     /**
-     * Llama esto cuando AdaptiveEngine produce una nueva decision.
-     * Ajusta el alpha del filtro según la puntuación del sistema (0-100).
-     * Score alto = sistema libre = alpha alto (responsivo).
-     * Score bajo = sistema cargado = alpha bajo (más suavizado).
+     * Recibe el score del AdaptiveEngine (0-100).
+     * Ajusta alpha y el umbral de zona muerta en tiempo real.
      */
     fun updateFromScore(score: Int) {
-        val t = score.coerceIn(0, 100) / 100f
+        systemScore = score.coerceIn(0, 100)
+        val t = systemScore / 100f
         alpha = ALPHA_MIN + t * (ALPHA_MAX - ALPHA_MIN)
     }
 
-    /** Reinicia el estado (al iniciar/parar una sesión de juego). */
+    /** Reinicia todo el estado al iniciar/cerrar una sesión de juego. */
     fun reset() {
-        smoothedX = 0f; smoothedY = 0f
-        prevSignX = 0f; prevSignY = 0f
-        jitterCountX = 0; jitterCountY = 0
-        jitterBoostActive = false; jitterBoostTicks = 0
+        smoothedX = 0f;  smoothedY = 0f
+        velocityX = 0f;  velocityY = 0f
+        prevSignX = 0f;  prevSignY = 0f
+        jitterCntX = 0;  jitterCntY = 0
+        jitterActive = false; jitterTicks = 0
+        stillFrames = 0; lockActive = false
     }
 
-    // ── Privados ──────────────────────────────────────────────────────────
+    /** True si el aim lock suave está activo en este momento. */
+    fun isLocked(): Boolean = lockActive
 
-    private fun applyDeadZone(v: Float): Float {
-        return if (abs(v) < DEAD_ZONE_DP) 0f else v
+    // ────────────────────────────────────────────────────────────────────
+    // Privados
+    // ────────────────────────────────────────────────────────────────────
+
+    private fun dynamicDeadZone(): Float {
+        val t = systemScore / 100f
+        return DEAD_ZONE_LOADED + t * (DEAD_ZONE_BASE - DEAD_ZONE_LOADED)
     }
 
-    private fun computeEffectiveAlpha(dx: Float, dy: Float): Float {
+    private fun applyDeadZone(v: Float, dz: Float) = if (abs(v) < dz) 0f else v
+
+    private fun effectiveAlpha(dx: Float, dy: Float): Float {
         detectJitter(dx, dy)
-        return if (jitterBoostActive) {
-            jitterBoostTicks--
-            if (jitterBoostTicks <= 0) { jitterBoostActive = false }
-            (alpha - JITTER_BOOST_DEC).coerceAtLeast(ALPHA_MIN)
-        } else {
-            alpha
-        }
+        return if (jitterActive) {
+            jitterTicks--
+            if (jitterTicks <= 0) jitterActive = false
+            (alpha - JITTER_ALPHA_DEC).coerceAtLeast(ALPHA_MIN)
+        } else alpha
     }
 
     private fun detectJitter(dx: Float, dy: Float) {
-        val sx = sign(dx)
-        val sy = sign(dy)
-        if (sx != 0f && sx != prevSignX) { jitterCountX++ } else { jitterCountX = 0 }
-        if (sy != 0f && sy != prevSignY) { jitterCountY++ } else { jitterCountY = 0 }
-        prevSignX = if (sx != 0f) sx else prevSignX
-        prevSignY = if (sy != 0f) sy else prevSignY
-        if (jitterCountX >= JITTER_THRESHOLD || jitterCountY >= JITTER_THRESHOLD) {
-            jitterBoostActive = true
-            jitterBoostTicks = 8
-            jitterCountX = 0; jitterCountY = 0
+        val sx = sign(dx); val sy = sign(dy)
+        if (sx != 0f && sx != prevSignX) jitterCntX++ else jitterCntX = 0
+        if (sy != 0f && sy != prevSignY) jitterCntY++ else jitterCntY = 0
+        if (sx != 0f) prevSignX = sx
+        if (sy != 0f) prevSignY = sy
+        if (jitterCntX >= JITTER_THRESHOLD || jitterCntY >= JITTER_THRESHOLD) {
+            jitterActive = true
+            jitterTicks  = JITTER_TICKS
+            jitterCntX   = 0; jitterCntY = 0
         }
     }
 }
