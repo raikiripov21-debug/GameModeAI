@@ -8,12 +8,11 @@ import java.io.File
 /**
  * OptimizerEngine — Samsung Galaxy A26 5G
  * SoC: Exynos 1380 | 8 cores | 90Hz AMOLED | Android 14 | 6 GB RAM
- * TEMPERATURA MÁXIMA: 40°C — parar acciones si se supera.
+ * TEMPERATURA MÁXIMA: 40°C
  */
 object OptimizerEngine {
 
     private const val TAG = "OptimizerEngine_A26"
-
     const val THERMAL_STOP_C = 40f
 
     sealed class Health {
@@ -42,18 +41,26 @@ object OptimizerEngine {
         }
     }
 
-    private var prevIdle = 0L; private var prevTotal = 0L
+    private var prevIdle = 0L
+    private var prevTotal = 0L
 
-    private fun readCpuPct(): Int = try {
-        val l = File("/proc/stat").readLines().firstOrNull { it.startsWith("cpu ") } ?: return 0
-        val p = l.trim().split("\\s+".toRegex())
-        if (p.size < 8) return 0
-        val idle = p[4].toLong() + p[5].toLong()
-        val total = p.drop(1).take(7).sumOf { it.toLong() }
-        val di = idle - prevIdle; val dt = total - prevTotal
-        prevIdle = idle; prevTotal = total
-        if (dt <= 0) 0 else ((1f - di.toFloat() / dt) * 100).toInt().coerceIn(0, 100)
-    } catch (e: Exception) { Log.w(TAG, e.message.toString()); 0 }
+    private fun readCpuPct(): Int {
+        return try {
+            val line = File("/proc/stat").readLines()
+                .firstOrNull { it.startsWith("cpu ") } ?: return 0
+            val parts = line.trim().split("\\s+".toRegex())
+            if (parts.size < 8) return 0
+            val idle  = parts[4].toLong() + parts[5].toLong()
+            val total = parts.drop(1).take(7).sumOf { it.toLong() }
+            val di = idle - prevIdle
+            val dt = total - prevTotal
+            prevIdle  = idle
+            prevTotal = total
+            if (dt <= 0) 0 else ((1f - di.toFloat() / dt) * 100).toInt().coerceIn(0, 100)
+        } catch (e: Exception) {
+            Log.w(TAG, e.message.toString()); 0
+        }
+    }
 
     fun readCpuTempC(): Float {
         val paths = listOf(
@@ -63,32 +70,46 @@ object OptimizerEngine {
         )
         for (p in paths) try {
             val raw = File(p).readText().trim().toLongOrNull() ?: continue
-            val t = if (raw > 1000) raw / 1000f else raw.toFloat()
+            val t   = if (raw > 1000) raw / 1000f else raw.toFloat()
             if (t in 20f..80f) return t
         } catch (_: Exception) {}
         return 0f
     }
 
-    fun readBatteryTempC(): Float = try {
-        val raw = File("/sys/class/power_supply/battery/temp").readText().trim().toIntOrNull() ?: return 0f
-        raw / 10f
-    } catch (_: Exception) { 0f }
-
-    fun readCpuMhz(): Int = try {
-        File("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq").readText().trim().toIntOrNull()?.div(1000) ?: 0
-    } catch (_: Exception) { 0 }
-
-    suspend fun getSnapshot(ramFreeMb: Long, ramTotalMb: Long): Snapshot = withContext(Dispatchers.IO) {
-        val cpu = readCpuPct(); val temp = readCpuTempC(); val batt = readBatteryTempC()
-        val mhz = readCpuMhz()
-        val health = when {
-            temp >= THERMAL_STOP_C || batt >= THERMAL_STOP_C -> Health.ThermalRisk
-            cpu > 80 -> Health.HighLoad
-            temp >= 35f || cpu > 60 -> Health.MediumLoad
-            else -> Health.Stable
+    fun readBatteryTempC(): Float {
+        return try {
+            val raw = File("/sys/class/power_supply/battery/temp")
+                .readText().trim().toIntOrNull() ?: return 0f
+            raw / 10f
+        } catch (_: Exception) {
+            0f
         }
-        Snapshot(cpu, temp, batt, ramFreeMb, ramTotalMb, mhz, health)
     }
 
-    fun shouldPause(snap: Snapshot) = snap.cpuTempC > THERMAL_STOP_C || snap.battTempC > THERMAL_STOP_C
+    fun readCpuMhz(): Int {
+        return try {
+            File("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+                .readText().trim().toIntOrNull()?.div(1000) ?: 0
+        } catch (_: Exception) {
+            0
+        }
+    }
+
+    suspend fun getSnapshot(ramFreeMb: Long, ramTotalMb: Long): Snapshot =
+        withContext(Dispatchers.IO) {
+            val cpu  = readCpuPct()
+            val temp = readCpuTempC()
+            val batt = readBatteryTempC()
+            val mhz  = readCpuMhz()
+            val health = when {
+                temp >= THERMAL_STOP_C || batt >= THERMAL_STOP_C -> Health.ThermalRisk
+                cpu > 80 -> Health.HighLoad
+                temp >= 35f || cpu > 60 -> Health.MediumLoad
+                else -> Health.Stable
+            }
+            Snapshot(cpu, temp, batt, ramFreeMb, ramTotalMb, mhz, health)
+        }
+
+    fun shouldPause(snap: Snapshot) =
+        snap.cpuTempC > THERMAL_STOP_C || snap.battTempC > THERMAL_STOP_C
 }
