@@ -21,10 +21,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/**
- * GameService — Samsung Galaxy A26 5G
- * SoC Exynos 1380 | Sin Shizuku | Solo APIs publicas
- */
 class GameService : Service() {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -55,6 +51,8 @@ class GameService : Service() {
         startForeground(NOTIF_ID, buildNotif("GameModeAI A26", "Motor iniciando..."))
         Prefs.startSession(this)
         AdaptiveEngine.reset()
+        AimStabilizer.reset()
+
         val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         job = scope.launch {
             while (isActive) {
@@ -62,12 +60,14 @@ class GameService : Service() {
                 am.getMemoryInfo(mi)
                 val ramFree  = mi.availMem  / (1024L * 1024L)
                 val ramTotal = mi.totalMem  / (1024L * 1024L)
+
                 val snap = OptimizerEngine.getSnapshot(ramFree, ramTotal)
                 val dec  = AdaptiveEngine.process(
                     snap.cpuPct, snap.cpuTempC, snap.ramFreeMb, snap.ramTotalMb
                 )
+                val lockTag = if (AimStabilizer.isLocked()) " [Mira fija]" else ""
                 nm.notify(NOTIF_ID, buildNotif(
-                    "GameModeAI A26 — ${snap.healthLabel}",
+                    "GameModeAI A26 — ${snap.healthLabel}$lockTag",
                     "CPU ${snap.cpuPct}%  T:${snap.cpuTempC.toInt()}C  RAM ${snap.ramUsedPct}% | ${dec.advice}"
                 ))
                 AdaptiveEngine.saveState(this@GameService)
@@ -103,6 +103,7 @@ class GameService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         job?.cancel()
+        AimStabilizer.reset()
         if (wakeLock?.isHeld == true) wakeLock?.release()
         Prefs.setActive(this, false)
         Log.d(TAG, "A26 service destroyed")
