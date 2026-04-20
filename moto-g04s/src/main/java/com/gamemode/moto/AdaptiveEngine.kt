@@ -83,6 +83,7 @@ object AdaptiveEngine {
             else         -> "Aprendiendo Moto — ciclo $cycles"
         }
 
+        AimStabilizer.updateFromScore(score)
         return Decision(delayMs, state != State.THERMAL_CAUTION, freq, state, score, advice)
     }
 
