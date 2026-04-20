@@ -1,99 +1,135 @@
 package com.gamemode.moto
 
 import kotlin.math.abs
+import kotlin.math.hypot
 import kotlin.math.sign
 
 /**
- * AimStabilizer — Motorola Moto G04s (Unisoc T606)
+ * AimStabilizer v2 — Motorola Moto G04s (Unisoc T606 / 60 Hz)
  *
- * Elimina la "mira bipolar" en el Moto G04s.
- * Parámetros independientes para Unisoc T606 @ 60 Hz.
- *
- * El T606 tiene menor throughput de GPU que Exynos/Snapdragon, por lo que
- * los frames caen más en momentos de carga. El estabilizador compensa
- * aumentando el suavizado cuando AdaptiveEngine detecta estrés del SoC.
- *
- *  • EMA: suaviza el delta de mira frame a frame.
- *  • Zona muerta 0.5 dp: más conservadora (60 Hz = menos frames = más jitter visible).
- *  • Anti-ráfaga: detecta cambios de signo consecutivos → activa modo calma.
- *  • Score binding: score bajo → alpha bajo (más suavizado automático).
+ *  1. Zona muerta adaptativa — más grande por defecto (60 Hz = señal más ruidosa).
+ *  2. EMA adaptativa — muy agresiva bajo carga (T606 se satura más fácil).
+ *  3. Predicción de velocidad — compensa el gap entre frames a 60 fps.
+ *  4. Detector de ráfaga — más ciclos de calma porque los frames duran más.
+ *  5. Aim lock suave — se activa a los 5 frames (≈ 83 ms @ 60 Hz).
+ *     Aplica fricción más fuerte para compensar la menor fluidez del SoC.
  */
 object AimStabilizer {
 
     // ── Parámetros Unisoc T606 / 60 Hz ───────────────────────────────────
-    private const val DEAD_ZONE_DP     = 0.5f   // zona muerta mayor (60 Hz, señal más ruidosa)
-    private const val ALPHA_MIN        = 0.15f  // bajo carga extrema: suavizado agresivo
-    private const val ALPHA_MAX        = 0.70f  // sistema libre: responsivo pero controlado
-    private const val JITTER_THRESHOLD = 3
-    private const val JITTER_BOOST_DEC = 0.12f  // reducción extra de alpha (SoC más débil)
-    private const val JITTER_TICKS     = 12     // más ciclos de calma (60 fps → más tiempo)
+    private const val DEAD_ZONE_BASE    = 0.45f
+    private const val DEAD_ZONE_LOADED  = 0.75f  // más agresiva bajo carga
+    private const val ALPHA_MIN         = 0.15f
+    private const val ALPHA_MAX         = 0.70f
+    private const val VELOCITY_MIX      = 0.25f  // mezcla menor (60 Hz = gaps más grandes)
+    private const val JITTER_THRESHOLD  = 3
+    private const val JITTER_ALPHA_DEC  = 0.12f
+    private const val JITTER_TICKS      = 12     // más ciclos a 60 Hz
+    private const val STILL_THRESHOLD   = 0.22f
+    private const val STILL_FRAMES_LOCK = 5      // 5 frames @ 60 Hz ≈ 83 ms
+    private const val LOCK_FRICTION     = 0.80f  // fricción mayor (SoC menos fluido)
 
     // ── Estado ────────────────────────────────────────────────────────────
-    private var smoothedX = 0f
-    private var smoothedY = 0f
-    private var alpha = 0.45f          // conservador por defecto en Moto
+    private var smoothedX   = 0f
+    private var smoothedY   = 0f
+    private var velocityX   = 0f
+    private var velocityY   = 0f
+    private var alpha       = 0.45f
+    private var systemScore = 45    // conservador por defecto en Moto
 
-    private var prevSignX = 0f
-    private var prevSignY = 0f
-    private var jitterCountX = 0
-    private var jitterCountY = 0
-    private var jitterBoostActive = false
-    private var jitterBoostTicks  = 0
+    private var prevSignX    = 0f
+    private var prevSignY    = 0f
+    private var jitterCntX   = 0
+    private var jitterCntY   = 0
+    private var jitterActive = false
+    private var jitterTicks  = 0
+
+    private var stillFrames = 0
+    private var lockActive  = false
 
     // ── API ───────────────────────────────────────────────────────────────
 
-    /**
-     * Suaviza el delta crudo de cada frame.
-     * @return Pair(dx_estabilizado, dy_estabilizado)
-     */
     fun smooth(rawDx: Float, rawDy: Float): Pair<Float, Float> {
+        val dz    = dynamicDeadZone()
+        val filtX = applyDeadZone(rawDx, dz)
+        val filtY = applyDeadZone(rawDy, dz)
+        val mag   = hypot(filtX, filtY)
+
+        // Aim lock suave
+        if (mag < STILL_THRESHOLD) {
+            stillFrames++
+            if (stillFrames >= STILL_FRAMES_LOCK) {
+                lockActive = true
+                smoothedX *= LOCK_FRICTION
+                smoothedY *= LOCK_FRICTION
+                velocityX *= LOCK_FRICTION
+                velocityY *= LOCK_FRICTION
+                return Pair(smoothedX, smoothedY)
+            }
+        } else {
+            stillFrames = 0
+            lockActive  = false
+        }
+
+        // Predicción de velocidad
+        val predX = filtX + VELOCITY_MIX * velocityX
+        val predY = filtY + VELOCITY_MIX * velocityY
+
+        // EMA adaptativo
         val eff = effectiveAlpha(rawDx, rawDy)
-        smoothedX = eff * deadZone(rawDx) + (1f - eff) * smoothedX
-        smoothedY = eff * deadZone(rawDy) + (1f - eff) * smoothedY
+        smoothedX = eff * predX + (1f - eff) * smoothedX
+        smoothedY = eff * predY + (1f - eff) * smoothedY
+        velocityX = smoothedX - predX * (1f - eff)
+        velocityY = smoothedY - predY * (1f - eff)
+
         return Pair(smoothedX, smoothedY)
     }
 
-    /**
-     * Adapta la sensibilidad según puntuación del AdaptiveEngine (0-100).
-     * Score alto = sistema libre = mira más responsiva.
-     * Score bajo = SoC cargado = suavizado automático para compensar frame drops.
-     */
     fun updateFromScore(score: Int) {
-        val t = score.coerceIn(0, 100) / 100f
+        systemScore = score.coerceIn(0, 100)
+        val t = systemScore / 100f
         alpha = ALPHA_MIN + t * (ALPHA_MAX - ALPHA_MIN)
     }
 
-    /** Reinicia al iniciar/cerrar sesión de juego. */
     fun reset() {
         smoothedX = 0f; smoothedY = 0f
+        velocityX = 0f; velocityY = 0f
         prevSignX = 0f; prevSignY = 0f
-        jitterCountX = 0; jitterCountY = 0
-        jitterBoostActive = false; jitterBoostTicks = 0
+        jitterCntX = 0; jitterCntY = 0
+        jitterActive = false; jitterTicks = 0
+        stillFrames = 0; lockActive = false
     }
+
+    fun isLocked(): Boolean = lockActive
 
     // ── Privados ──────────────────────────────────────────────────────────
 
-    private fun deadZone(v: Float) = if (abs(v) < DEAD_ZONE_DP) 0f else v
+    private fun dynamicDeadZone(): Float {
+        val t = systemScore / 100f
+        return DEAD_ZONE_LOADED + t * (DEAD_ZONE_BASE - DEAD_ZONE_LOADED)
+    }
+
+    private fun applyDeadZone(v: Float, dz: Float) = if (abs(v) < dz) 0f else v
 
     private fun effectiveAlpha(dx: Float, dy: Float): Float {
         detectJitter(dx, dy)
-        return if (jitterBoostActive) {
-            jitterBoostTicks--
-            if (jitterBoostTicks <= 0) jitterBoostActive = false
-            (alpha - JITTER_BOOST_DEC).coerceAtLeast(ALPHA_MIN)
+        return if (jitterActive) {
+            jitterTicks--
+            if (jitterTicks <= 0) jitterActive = false
+            (alpha - JITTER_ALPHA_DEC).coerceAtLeast(ALPHA_MIN)
         } else alpha
     }
 
     private fun detectJitter(dx: Float, dy: Float) {
         val sx = sign(dx); val sy = sign(dy)
-        if (sx != 0f && sx != prevSignX) jitterCountX++ else jitterCountX = 0
-        if (sy != 0f && sy != prevSignY) jitterCountY++ else jitterCountY = 0
+        if (sx != 0f && sx != prevSignX) jitterCntX++ else jitterCntX = 0
+        if (sy != 0f && sy != prevSignY) jitterCntY++ else jitterCntY = 0
         if (sx != 0f) prevSignX = sx
         if (sy != 0f) prevSignY = sy
-        if (jitterCountX >= JITTER_THRESHOLD || jitterCountY >= JITTER_THRESHOLD) {
-            jitterBoostActive = true
-            jitterBoostTicks  = JITTER_TICKS
-            jitterCountX = 0; jitterCountY = 0
+        if (jitterCntX >= JITTER_THRESHOLD || jitterCntY >= JITTER_THRESHOLD) {
+            jitterActive = true
+            jitterTicks  = JITTER_TICKS
+            jitterCntX   = 0; jitterCntY = 0
         }
     }
 }
