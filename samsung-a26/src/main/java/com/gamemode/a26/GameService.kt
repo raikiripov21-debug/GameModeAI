@@ -21,16 +21,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-/**
- * GameService — Samsung Galaxy A26 5G
- * Servicio en primer plano con AdaptiveEngine integrado.
- * Sin Shizuku — usa APIs publicas unicamente.
- */
 class GameService : Service() {
 
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
     private var job: Job? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private val nm by lazy { getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager }
 
     companion object {
         private const val CHANNEL_ID = "gm_a26_channel"
@@ -48,35 +44,31 @@ class GameService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIF_ID, buildNotif("Iniciando A26", "Motor A26 arrancando"))
+        startForeground(NOTIF_ID, buildNotif("GameModeAI A26", "Motor iniciando..."))
         Prefs.startSession(this)
         AdaptiveEngine.reset()
-        job = scope.launch { runLoop() }
-        return START_STICKY
-    }
 
-    private fun CoroutineScope.runLoop() {
         val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
-        while (isActive) {
-            val mi = ActivityManager.MemoryInfo()
-            am.getMemoryInfo(mi)
-            val ramFree  = mi.availMem / (1024L * 1024L)
-            val ramTotal = mi.totalMem / (1024L * 1024L)
+        job = scope.launch {
+            while (isActive) {
+                val mi = ActivityManager.MemoryInfo()
+                am.getMemoryInfo(mi)
+                val ramFree  = mi.availMem / (1024L * 1024L)
+                val ramTotal = mi.totalMem / (1024L * 1024L)
 
-            val snap = kotlinx.coroutines.runBlocking {
-                OptimizerEngine.getSnapshot(ramFree, ramTotal)
+                val snap = OptimizerEngine.getSnapshot(ramFree, ramTotal)
+                val dec  = AdaptiveEngine.process(
+                    snap.cpuPct, snap.cpuTempC, snap.ramFreeMb, snap.ramTotalMb)
+
+                nm.notify(NOTIF_ID, buildNotif(
+                    "GameModeAI A26 — ${snap.healthLabel}",
+                    "CPU:${snap.cpuPct}% T:${snap.cpuTempC.toInt()}C RAM:${snap.ramUsedPct}% | ${dec.advice}"
+                ))
+                AdaptiveEngine.saveState(this@GameService)
+                delay(dec.delayMs)
             }
-            val dec = AdaptiveEngine.process(
-                snap.cpuPct, snap.cpuTempC, snap.ramFreeMb, snap.ramTotalMb)
-
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            nm.notify(NOTIF_ID, buildNotif(
-                "GameModeAI A26 — ${snap.healthLabel}",
-                "CPU:${snap.cpuPct}% T:${snap.cpuTempC.toInt()}°C | ${dec.advice}"
-            ))
-            AdaptiveEngine.saveState(this@GameService)
-            Thread.sleep(dec.delayMs)
         }
+        return START_STICKY
     }
 
     private fun buildNotif(title: String, text: String): Notification {
@@ -94,14 +86,13 @@ class GameService : Service() {
             val ch = NotificationChannel(
                 CHANNEL_ID, "Game Mode AI A26", NotificationManager.IMPORTANCE_MIN
             ).apply { setShowBadge(false); setSound(null, null) }
-            (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-                .createNotificationChannel(ch)
+            nm.createNotificationChannel(ch)
         }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        job?.cancel(); scope.let { }
+        job?.cancel()
         if (wakeLock?.isHeld == true) wakeLock?.release()
         Prefs.setActive(this, false)
         Log.d(TAG, "A26 service destroyed")
