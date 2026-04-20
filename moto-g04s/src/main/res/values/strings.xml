@@ -1,10 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">GameMode AI Moto</string>
-    <string name="notification_title">GameMode AI activo</string>
-    <string name="notification_text">Optimizando rendimiento para Motorola Moto G04s</string>
-    <string name="btn_start">Iniciar optimización</string>
-    <string name="btn_stop">Detener optimización</string>
-    <string name="device_name">Motorola Moto G04s</string>
-    <string name="chip_name">Unisoc T606</string>
+    <string name="app_name">GameModeAI Moto</string>
 </resources>
