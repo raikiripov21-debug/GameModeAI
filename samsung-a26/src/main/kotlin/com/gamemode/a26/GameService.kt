@@ -1,67 +1,112 @@
 package com.gamemode.a26
 
-import android.app.*
+import android.app.ActivityManager
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
+/**
+ * GameService — Samsung Galaxy A26 5G
+ * SoC Exynos 1380 | Sin Shizuku | Solo APIs publicas
+ */
 class GameService : Service() {
 
-    private val CHANNEL_ID = "gamemode_a26_channel"
-    private val NOTIFICATION_ID = 1001
+    private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private var job: Job? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+    private val nm by lazy {
+        getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+    }
+
+    companion object {
+        private const val CHANNEL_ID = "gm_a26_channel"
+        private const val NOTIF_ID   = 2001
+        private const val TAG        = "GameService_A26"
+    }
 
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        createChannel()
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK, "GameModeAI_A26::WakeLock"
+        )
+        wakeLock?.acquire(20 * 60 * 1000L)
+        AdaptiveEngine.restoreState(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val notification = buildNotification()
-        startForeground(NOTIFICATION_ID, notification)
-        applyOptimizations()
+        startForeground(NOTIF_ID, buildNotif("GameModeAI A26", "Motor iniciando..."))
+        Prefs.startSession(this)
+        AdaptiveEngine.reset()
+        val am = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        job = scope.launch {
+            while (isActive) {
+                val mi = ActivityManager.MemoryInfo()
+                am.getMemoryInfo(mi)
+                val ramFree  = mi.availMem  / (1024L * 1024L)
+                val ramTotal = mi.totalMem  / (1024L * 1024L)
+                val snap = OptimizerEngine.getSnapshot(ramFree, ramTotal)
+                val dec  = AdaptiveEngine.process(
+                    snap.cpuPct, snap.cpuTempC, snap.ramFreeMb, snap.ramTotalMb
+                )
+                nm.notify(NOTIF_ID, buildNotif(
+                    "GameModeAI A26 — ${snap.healthLabel}",
+                    "CPU ${snap.cpuPct}%  T:${snap.cpuTempC.toInt()}C  RAM ${snap.ramUsedPct}% | ${dec.advice}"
+                ))
+                AdaptiveEngine.saveState(this@GameService)
+                delay(dec.delayMs)
+            }
+        }
         return START_STICKY
     }
 
-    private fun applyOptimizations() {
-        // A26 specific: Exynos 1280 optimizations using public APIs only
-        // CPU: schedutil governor preference via system hints
-        // GPU: Mali-G68 MP4 — high performance mode when game detected
-        // RAM: 6GB available — aggressive LRU cache clearing
-        // Touch: 240Hz touch sampling rate request
-    }
-
-    private fun buildNotification(): Notification {
-        val pendingIntent = PendingIntent.getActivity(
+    private fun buildNotif(title: String, text: String): Notification {
+        val pi = PendingIntent.getActivity(
             this, 0,
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("GameMode AI — A26")
-            .setContentText("Optimización activa: Exynos 1280 en modo rendimiento")
+            .setContentTitle(title).setContentText(text)
             .setSmallIcon(android.R.drawable.ic_media_play)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
+            .setContentIntent(pi).setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_MIN).setSilent(true)
             .build()
     }
 
-    private fun createNotificationChannel() {
-        val channel = NotificationChannel(
-            CHANNEL_ID,
-            "GameMode A26 Service",
-            NotificationManager.IMPORTANCE_LOW
-        ).apply {
-            description = "Servicio de optimización para Samsung Galaxy A26"
-            setShowBadge(false)
+    private fun createChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val ch = NotificationChannel(
+                CHANNEL_ID, "GameMode AI A26", NotificationManager.IMPORTANCE_MIN
+            ).apply { setShowBadge(false); setSound(null, null) }
+            nm.createNotificationChannel(ch)
         }
-        val manager = getSystemService(NotificationManager::class.java)
-        manager.createNotificationChannel(channel)
     }
-
-    override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
         super.onDestroy()
-        stopForeground(STOP_FOREGROUND_REMOVE)
+        job?.cancel()
+        if (wakeLock?.isHeld == true) wakeLock?.release()
+        Prefs.setActive(this, false)
+        Log.d(TAG, "A26 service destroyed")
     }
+
+    override fun onBind(intent: Intent?): IBinder? = null
 }
